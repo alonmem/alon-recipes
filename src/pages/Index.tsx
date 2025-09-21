@@ -7,7 +7,6 @@ import { RecipeDetail } from "@/components/RecipeDetail";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import heroImage from "@/assets/recipe-hero.jpg";
-
 const Index = () => {
   const [recipes, setRecipes] = useState<Recipe[]>(mockRecipes);
   const [searchQuery, setSearchQuery] = useState("");
@@ -23,17 +22,11 @@ const Index = () => {
   // Filter recipes based on search and tags
   const filteredRecipes = useMemo(() => {
     return recipes.filter(recipe => {
-      const matchesSearch = recipe.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          recipe.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          recipe.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()));
-      
-      const matchesTags = selectedTags.length === 0 || 
-                         selectedTags.every(tag => recipe.tags.includes(tag));
-      
+      const matchesSearch = recipe.title.toLowerCase().includes(searchQuery.toLowerCase()) || recipe.description.toLowerCase().includes(searchQuery.toLowerCase()) || recipe.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchesTags = selectedTags.length === 0 || selectedTags.every(tag => recipe.tags.includes(tag));
       return matchesSearch && matchesTags;
     });
   }, [recipes, searchQuery, selectedTags]);
-
   const handleAddComment = (recipeId: string, commentText: string) => {
     setRecipes(prev => prev.map(recipe => {
       if (recipe.id === recipeId) {
@@ -49,7 +42,7 @@ const Index = () => {
       }
       return recipe;
     }));
-    
+
     // Update selected recipe if it's currently viewed
     if (selectedRecipe?.id === recipeId) {
       const updatedRecipe = recipes.find(r => r.id === recipeId);
@@ -66,43 +59,26 @@ const Index = () => {
       }
     }
   };
-
   const handleEditRecipe = (recipe: Recipe) => {
     // TODO: Implement recipe editing functionality
     console.log("Edit recipe:", recipe);
   };
-
   if (selectedRecipe) {
-    return (
-      <div className="min-h-screen bg-background">
+    return <div className="min-h-screen bg-background">
         <div className="container mx-auto px-4 py-8">
-          <RecipeDetail
-            recipe={selectedRecipe}
-            onBack={() => setSelectedRecipe(null)}
-            onEdit={handleEditRecipe}
-            onAddComment={handleAddComment}
-          />
+          <RecipeDetail recipe={selectedRecipe} onBack={() => setSelectedRecipe(null)} onEdit={handleEditRecipe} onAddComment={handleAddComment} />
         </div>
-      </div>
-    );
+      </div>;
   }
-
-  return (
-    <div className="min-h-screen bg-background">
+  return <div className="min-h-screen bg-background">
       {/* Hero Section */}
       <div className="relative h-[400px] overflow-hidden">
-        <img 
-          src={heroImage} 
-          alt="Recipe Collection Hero" 
-          className="w-full h-full object-cover"
-        />
+        <img src={heroImage} alt="Recipe Collection Hero" className="w-full h-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-r from-recipe-brown/80 to-recipe-brown/40" />
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-center text-white space-y-4">
-            <h1 className="text-4xl md:text-5xl font-bold">My Recipe Collection</h1>
-            <p className="text-lg md:text-xl text-white/90 max-w-2xl">
-              Discover, organize, and perfect your favorite recipes with personal notes and ratings
-            </p>
+            <h1 className="text-4xl md:text-5xl font-bold">Alon's Recipe Collection</h1>
+            <p className="text-lg md:text-xl text-white/90 max-w-2xl">My favorite recipes with personal notes and ratings</p>
           </div>
         </div>
       </div>
@@ -119,12 +95,7 @@ const Index = () => {
             </Button>
           </div>
           
-          <RecipeSearch
-            onSearch={setSearchQuery}
-            onTagFilter={setSelectedTags}
-            availableTags={availableTags}
-            selectedTags={selectedTags}
-          />
+          <RecipeSearch onSearch={setSearchQuery} onTagFilter={setSelectedTags} availableTags={availableTags} selectedTags={selectedTags} />
         </div>
 
         {/* Results Summary */}
@@ -135,28 +106,16 @@ const Index = () => {
         </div>
 
         {/* Recipe Grid */}
-        {filteredRecipes.length === 0 ? (
-          <div className="text-center py-12">
+        {filteredRecipes.length === 0 ? <div className="text-center py-12">
             <div className="text-6xl mb-4">🔍</div>
             <h3 className="text-xl font-semibold mb-2">No recipes found</h3>
             <p className="text-muted-foreground">
               Try adjusting your search terms or filters
             </p>
-          </div>
-        ) : (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredRecipes.map((recipe) => (
-              <RecipeCard
-                key={recipe.id}
-                recipe={recipe}
-                onView={setSelectedRecipe}
-              />
-            ))}
-          </div>
-        )}
+          </div> : <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {filteredRecipes.map(recipe => <RecipeCard key={recipe.id} recipe={recipe} onView={setSelectedRecipe} />)}
+          </div>}
       </div>
-    </div>
-  );
+    </div>;
 };
-
 export default Index;
