@@ -4,6 +4,7 @@ import { mockRecipes } from "@/data/mockRecipes";
 import { RecipeCard } from "@/components/RecipeCard";
 import { RecipeSearch } from "@/components/RecipeSearch";
 import { RecipeDetail } from "@/components/RecipeDetail";
+import { RecipeForm } from "@/components/RecipeForm";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import heroImage from "@/assets/recipe-hero.jpg";
@@ -12,6 +13,7 @@ const Index = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+  const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
 
   // Get all available tags from recipes
   const availableTags = useMemo(() => {
@@ -60,9 +62,30 @@ const Index = () => {
     }
   };
   const handleEditRecipe = (recipe: Recipe) => {
-    // TODO: Implement recipe editing functionality
-    console.log("Edit recipe:", recipe);
+    setEditingRecipe(recipe);
+    setSelectedRecipe(null);
   };
+
+  const handleSaveRecipe = (updatedRecipe: Recipe) => {
+    setRecipes(prev => prev.map(recipe => 
+      recipe.id === updatedRecipe.id ? updatedRecipe : recipe
+    ));
+    setEditingRecipe(null);
+  };
+  if (editingRecipe) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="container mx-auto px-4 py-8">
+          <RecipeForm 
+            recipe={editingRecipe} 
+            onSave={handleSaveRecipe} 
+            onCancel={() => setEditingRecipe(null)} 
+          />
+        </div>
+      </div>
+    );
+  }
+
   if (selectedRecipe) {
     return <div className="min-h-screen bg-background">
         <div className="container mx-auto px-4 py-8">
