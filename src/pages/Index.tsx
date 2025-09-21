@@ -72,6 +72,11 @@ const Index = () => {
     ));
     setEditingRecipe(null);
   };
+
+  const handleDeleteRecipe = (recipeId: string) => {
+    setRecipes(prev => prev.filter(recipe => recipe.id !== recipeId));
+    setEditingRecipe(null);
+  };
   if (editingRecipe) {
     return (
       <div className="min-h-screen bg-background">
@@ -79,7 +84,8 @@ const Index = () => {
           <RecipeForm 
             recipe={editingRecipe} 
             onSave={handleSaveRecipe} 
-            onCancel={() => setEditingRecipe(null)} 
+            onCancel={() => setEditingRecipe(null)}
+            onDelete={handleDeleteRecipe}
           />
         </div>
       </div>

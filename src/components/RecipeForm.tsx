@@ -7,15 +7,16 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Plus, X, ArrowLeft, Save } from "lucide-react";
+import { Plus, X, ArrowLeft, Save, Trash2 } from "lucide-react";
 
 interface RecipeFormProps {
   recipe: Recipe;
   onSave: (recipe: Recipe) => void;
   onCancel: () => void;
+  onDelete: (recipeId: string) => void;
 }
 
-export const RecipeForm = ({ recipe, onSave, onCancel }: RecipeFormProps) => {
+export const RecipeForm = ({ recipe, onSave, onCancel, onDelete }: RecipeFormProps) => {
   const [formData, setFormData] = useState<Recipe>({
     ...recipe,
     ingredients: [...recipe.ingredients],
@@ -113,10 +114,20 @@ export const RecipeForm = ({ recipe, onSave, onCancel }: RecipeFormProps) => {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={onCancel} className="gap-2">
-          <ArrowLeft className="w-4 h-4" />
-          Cancel
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" onClick={onCancel} className="gap-2">
+            <ArrowLeft className="w-4 h-4" />
+            Cancel
+          </Button>
+          <Button 
+            variant="destructive" 
+            onClick={() => onDelete(recipe.id)} 
+            className="gap-2"
+          >
+            <Trash2 className="w-4 h-4" />
+            Delete Recipe
+          </Button>
+        </div>
         <Button onClick={handleSave} className="gap-2">
           <Save className="w-4 h-4" />
           Save Recipe
