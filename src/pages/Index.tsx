@@ -67,15 +67,39 @@ const Index = () => {
   };
 
   const handleSaveRecipe = (updatedRecipe: Recipe) => {
-    setRecipes(prev => prev.map(recipe => 
-      recipe.id === updatedRecipe.id ? updatedRecipe : recipe
-    ));
+    if (recipes.find(r => r.id === updatedRecipe.id)) {
+      // Existing recipe - update
+      setRecipes(prev => prev.map(recipe => 
+        recipe.id === updatedRecipe.id ? updatedRecipe : recipe
+      ));
+    } else {
+      // New recipe - add
+      setRecipes(prev => [...prev, updatedRecipe]);
+    }
     setEditingRecipe(null);
   };
 
   const handleDeleteRecipe = (recipeId: string) => {
     setRecipes(prev => prev.filter(recipe => recipe.id !== recipeId));
     setEditingRecipe(null);
+  };
+
+  const handleCreateRecipe = () => {
+    const newRecipe: Recipe = {
+      id: `recipe-${Date.now()}`,
+      title: "",
+      description: "",
+      rating: 0,
+      tags: [],
+      ingredients: [],
+      instructions: [],
+      cookTime: 0,
+      servings: 1,
+      comments: [],
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    setEditingRecipe(newRecipe);
   };
   if (editingRecipe) {
     return (
@@ -86,6 +110,7 @@ const Index = () => {
             onSave={handleSaveRecipe} 
             onCancel={() => setEditingRecipe(null)}
             onDelete={handleDeleteRecipe}
+            isNewRecipe={!recipes.find(r => r.id === editingRecipe.id)}
           />
         </div>
       </div>
@@ -118,7 +143,7 @@ const Index = () => {
         <div className="bg-card rounded-lg p-6 shadow-[var(--shadow-card)]">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-semibold">Browse Recipes</h2>
-            <Button className="gap-2">
+            <Button onClick={handleCreateRecipe} className="gap-2">
               <Plus className="w-4 h-4" />
               Add Recipe
             </Button>

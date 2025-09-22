@@ -7,16 +7,20 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Plus, X, ArrowLeft, Save, Trash2 } from "lucide-react";
+import { Plus, X, ArrowLeft, Save, Trash2, Globe } from "lucide-react";
+import { RecipeExtractorService } from "@/services/recipeExtractor";
+import { useToast } from "@/components/ui/use-toast";
 
 interface RecipeFormProps {
   recipe: Recipe;
   onSave: (recipe: Recipe) => void;
   onCancel: () => void;
   onDelete: (recipeId: string) => void;
+  isNewRecipe?: boolean;
 }
 
-export const RecipeForm = ({ recipe, onSave, onCancel, onDelete }: RecipeFormProps) => {
+export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = false }: RecipeFormProps) => {
+  const { toast } = useToast();
   const [formData, setFormData] = useState<Recipe>({
     ...recipe,
     ingredients: [...recipe.ingredients],
@@ -26,6 +30,7 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete }: RecipeFormPro
   const [newTag, setNewTag] = useState("");
   const [newIngredient, setNewIngredient] = useState({ name: "", amount: "", unit: "" });
   const [newInstruction, setNewInstruction] = useState("");
+  const [isExtracting, setIsExtracting] = useState(false);
 
   const handleSave = () => {
     const updatedRecipe = {
@@ -110,6 +115,67 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete }: RecipeFormPro
     }));
   };
 
+  const extractFromWebsite = async () => {
+    if (!formData.websiteUrl) {
+      toast({
+        title: "No URL provided",
+        description: "Please enter a website URL first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsExtracting(true);
+    
+    try {
+      const result = await RecipeExtractorService.extractFromUrl(formData.websiteUrl);
+      
+      if (result.success) {
+        // Add extracted instructions
+        if (result.instructions && result.instructions.length > 0) {
+          setFormData(prev => ({
+            ...prev,
+            instructions: [...prev.instructions, ...result.instructions!]
+          }));
+        }
+
+        // Add extracted ingredients
+        if (result.ingredients && result.ingredients.length > 0) {
+          const newIngredients = result.ingredients.map(ing => ({
+            id: `ingredient-${Date.now()}-${Math.random()}`,
+            name: ing.name,
+            amount: ing.amount,
+            unit: ing.unit
+          }));
+          
+          setFormData(prev => ({
+            ...prev,
+            ingredients: [...prev.ingredients, ...newIngredients]
+          }));
+        }
+
+        toast({
+          title: "Success!",
+          description: `Extracted ${result.instructions?.length || 0} instructions and ${result.ingredients?.length || 0} ingredients`,
+        });
+      } else {
+        toast({
+          title: "Extraction failed",
+          description: result.error || "Could not extract recipe information from the website",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to extract recipe information",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -119,14 +185,16 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete }: RecipeFormPro
             <ArrowLeft className="w-4 h-4" />
             Cancel
           </Button>
-          <Button 
-            variant="destructive" 
-            onClick={() => onDelete(recipe.id)} 
-            className="gap-2"
-          >
-            <Trash2 className="w-4 h-4" />
-            Delete Recipe
-          </Button>
+          {!isNewRecipe && (
+            <Button 
+              variant="destructive" 
+              onClick={() => onDelete(recipe.id)} 
+              className="gap-2"
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete Recipe
+            </Button>
+          )}
         </div>
         <Button onClick={handleSave} className="gap-2">
           <Save className="w-4 h-4" />
@@ -216,12 +284,25 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete }: RecipeFormPro
               
               <div>
                 <Label htmlFor="websiteUrl">Website URL</Label>
-                <Input
-                  id="websiteUrl"
-                  value={formData.websiteUrl || ""}
-                  onChange={(e) => setFormData(prev => ({ ...prev, websiteUrl: e.target.value }))}
-                  placeholder="https://example.com/recipe"
-                />
+                <div className="flex gap-2">
+                  <Input
+                    id="websiteUrl"
+                    value={formData.websiteUrl || ""}
+                    onChange={(e) => setFormData(prev => ({ ...prev, websiteUrl: e.target.value }))}
+                    placeholder="https://example.com/recipe"
+                    className="flex-1"
+                  />
+                  <Button 
+                    type="button"
+                    variant="outline" 
+                    onClick={extractFromWebsite}
+                    disabled={isExtracting || !formData.websiteUrl}
+                    className="gap-2"
+                  >
+                    <Globe className="w-4 h-4" />
+                    {isExtracting ? "Extracting..." : "Extract"}
+                  </Button>
+                </div>
               </div>
 
               <div>
