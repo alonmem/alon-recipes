@@ -1,15 +1,17 @@
 import { useState, useMemo } from "react";
 import { Recipe } from "@/types/recipe";
-import { mockRecipes } from "@/data/mockRecipes";
 import { RecipeCard } from "@/components/RecipeCard";
 import { RecipeSearch } from "@/components/RecipeSearch";
 import { RecipeDetail } from "@/components/RecipeDetail";
 import { RecipeForm } from "@/components/RecipeForm";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
+import { useRecipes } from "@/hooks/useRecipes";
+import { useToast } from "@/hooks/use-toast";
 import heroImage from "@/assets/recipe-hero.jpg";
 const Index = () => {
-  const [recipes, setRecipes] = useState<Recipe[]>(mockRecipes);
+  const { recipes, loading, saveRecipe, deleteRecipe, addComment } = useRecipes();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
@@ -29,64 +31,65 @@ const Index = () => {
       return matchesSearch && matchesTags;
     });
   }, [recipes, searchQuery, selectedTags]);
-  const handleAddComment = (recipeId: string, commentText: string) => {
-    setRecipes(prev => prev.map(recipe => {
-      if (recipe.id === recipeId) {
-        const newComment = {
-          id: `comment-${Date.now()}`,
-          text: commentText,
-          date: new Date()
-        };
-        return {
-          ...recipe,
-          comments: [...recipe.comments, newComment]
-        };
-      }
-      return recipe;
-    }));
 
-    // Update selected recipe if it's currently viewed
-    if (selectedRecipe?.id === recipeId) {
-      const updatedRecipe = recipes.find(r => r.id === recipeId);
-      if (updatedRecipe) {
-        const newComment = {
-          id: `comment-${Date.now()}`,
-          text: commentText,
-          date: new Date()
-        };
-        setSelectedRecipe({
-          ...updatedRecipe,
-          comments: [...updatedRecipe.comments, newComment]
-        });
-      }
+  const handleAddComment = async (recipeId: string, commentText: string) => {
+    try {
+      await addComment(recipeId, commentText);
+      toast({
+        title: "Comment added",
+        description: "Your comment has been added successfully.",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to add comment. Please try again.",
+        variant: "destructive",
+      });
     }
   };
+
   const handleEditRecipe = (recipe: Recipe) => {
     setEditingRecipe(recipe);
     setSelectedRecipe(null);
   };
 
-  const handleSaveRecipe = (updatedRecipe: Recipe) => {
-    if (recipes.find(r => r.id === updatedRecipe.id)) {
-      // Existing recipe - update
-      setRecipes(prev => prev.map(recipe => 
-        recipe.id === updatedRecipe.id ? updatedRecipe : recipe
-      ));
-    } else {
-      // New recipe - add
-      setRecipes(prev => [...prev, updatedRecipe]);
+  const handleSaveRecipe = async (updatedRecipe: Recipe) => {
+    try {
+      await saveRecipe(updatedRecipe);
+      setEditingRecipe(null);
+      toast({
+        title: "Recipe saved",
+        description: "Your recipe has been saved successfully.",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to save recipe. Please try again.",
+        variant: "destructive",
+      });
     }
-    setEditingRecipe(null);
   };
 
-  const handleDeleteRecipe = (recipeId: string) => {
-    setRecipes(prev => prev.filter(recipe => recipe.id !== recipeId));
-    setEditingRecipe(null);
+  const handleDeleteRecipe = async (recipeId: string) => {
+    try {
+      await deleteRecipe(recipeId);
+      setEditingRecipe(null);
+      toast({
+        title: "Recipe deleted",
+        description: "Your recipe has been deleted successfully.",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to delete recipe. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleCreateRecipe = () => {
     const newRecipe: Recipe = {
-      id: `recipe-${Date.now()}`,
+      id: `temp-${Date.now()}`,
       title: "",
       description: "",
       rating: 0,
@@ -123,6 +126,17 @@ const Index = () => {
           <RecipeDetail recipe={selectedRecipe} onBack={() => setSelectedRecipe(null)} onEdit={handleEditRecipe} onAddComment={handleAddComment} />
         </div>
       </div>;
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-lg">Loading recipes...</p>
+        </div>
+      </div>
+    );
   }
   return <div className="min-h-screen bg-background">
       {/* Hero Section */}
