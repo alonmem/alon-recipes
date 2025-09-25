@@ -14,7 +14,121 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      comments: {
+        Row: {
+          created_at: string | null
+          id: string
+          rating: number | null
+          recipe_id: string
+          text: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          rating?: number | null
+          recipe_id: string
+          text: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          rating?: number | null
+          recipe_id?: string
+          text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "comments_recipe_id_fkey"
+            columns: ["recipe_id"]
+            isOneToOne: false
+            referencedRelation: "recipes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ingredients: {
+        Row: {
+          amount: string
+          created_at: string | null
+          id: string
+          name: string
+          recipe_id: string
+          unit: string
+        }
+        Insert: {
+          amount: string
+          created_at?: string | null
+          id?: string
+          name: string
+          recipe_id: string
+          unit: string
+        }
+        Update: {
+          amount?: string
+          created_at?: string | null
+          id?: string
+          name?: string
+          recipe_id?: string
+          unit?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ingredients_recipe_id_fkey"
+            columns: ["recipe_id"]
+            isOneToOne: false
+            referencedRelation: "recipes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      recipes: {
+        Row: {
+          cook_time: number | null
+          created_at: string | null
+          description: string | null
+          id: string
+          image: string | null
+          instructions: string[] | null
+          rating: number | null
+          servings: number | null
+          tags: string[] | null
+          title: string
+          updated_at: string | null
+          website_url: string | null
+          youtube_url: string | null
+        }
+        Insert: {
+          cook_time?: number | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          image?: string | null
+          instructions?: string[] | null
+          rating?: number | null
+          servings?: number | null
+          tags?: string[] | null
+          title: string
+          updated_at?: string | null
+          website_url?: string | null
+          youtube_url?: string | null
+        }
+        Update: {
+          cook_time?: number | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          image?: string | null
+          instructions?: string[] | null
+          rating?: number | null
+          servings?: number | null
+          tags?: string[] | null
+          title?: string
+          updated_at?: string | null
+          website_url?: string | null
+          youtube_url?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
