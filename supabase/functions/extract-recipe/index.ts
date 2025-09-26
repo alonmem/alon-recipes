@@ -110,6 +110,21 @@ Rules:
     if (!openaiResponse.ok) {
       const errorText = await openaiResponse.text();
       console.error('OpenAI API error:', errorText);
+      
+      // Handle quota exceeded error specifically
+      if (openaiResponse.status === 429) {
+        const errorData = JSON.parse(errorText);
+        if (errorData.error?.code === 'insufficient_quota') {
+          console.log('OpenAI quota exceeded, falling back to basic extraction');
+          // Fall back to basic HTML parsing
+          const fallbackResult = basicRecipeExtraction(cleanedText);
+          return new Response(
+            JSON.stringify(fallbackResult),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+      }
+      
       throw new Error(`OpenAI API error: ${openaiResponse.status}`);
     }
 
@@ -151,7 +166,7 @@ Rules:
       instructions: recipeData.instructions || [],
       cookTime: recipeData.cookTime || 0,
       servings: recipeData.servings || 1,
-      image: recipeData.image || null
+      image: recipeData.image || undefined
     };
 
     console.log('Recipe extraction successful');
@@ -202,4 +217,98 @@ function cleanHtmlContent(html: string): string {
   cleaned = cleaned.replace(/\n\s*\n/g, '\n');
   
   return cleaned.trim();
+}
+
+function basicRecipeExtraction(content: string): RecipeExtractionResult {
+  const instructions: string[] = [];
+  const ingredients: Array<{ name: string; amount: string; unit: string }> = [];
+  
+  console.log('Using basic extraction fallback');
+  
+  // Split content into lines
+  const lines = content.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+  
+  // Look for numbered instructions or action words
+  const instructionKeywords = [
+    'heat', 'cook', 'bake', 'fry', 'boil', 'simmer', 'mix', 'stir', 'add', 
+    'combine', 'whisk', 'blend', 'chop', 'dice', 'slice', 'melt', 'pour',
+    'season', 'serve', 'preheat', 'remove', 'transfer', 'cover'
+  ];
+
+  // Enhanced ingredient detection
+  const ingredientRegex = /(\d+(?:[\/\.\d]*)?)\s*(cups?|cup|tablespoons?|tbsp|teaspoons?|tsp|ounces?|oz|pounds?|lbs?|lb|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|cloves?|pieces?|slices?|large|medium|small|whole|can|cans)\s+(?:of\s+)?(.+?)(?=\n|$|,|\()/gi;
+
+  let inIngredientsSection = false;
+  let inInstructionsSection = false;
+
+  for (const line of lines) {
+    const lowerLine = line.toLowerCase();
+    
+    // Section detection
+    if (lowerLine.includes('ingredient') || lowerLine.includes('you need') || lowerLine.includes('shopping')) {
+      inIngredientsSection = true;
+      inInstructionsSection = false;
+      continue;
+    }
+    
+    if (lowerLine.includes('instruction') || lowerLine.includes('method') || lowerLine.includes('direction') || lowerLine.includes('steps')) {
+      inInstructionsSection = true;
+      inIngredientsSection = false;
+      continue;
+    }
+
+    // Extract instructions
+    if (inInstructionsSection || 
+        (/^\d+\./.test(line) && line.length > 15) ||
+        (instructionKeywords.some(keyword => lowerLine.includes(keyword)) && line.length > 20 && line.length < 300)) {
+      const cleanInstruction = line.replace(/^\d+\.\s*/, '').trim();
+      if (cleanInstruction.length > 10 && !instructions.includes(cleanInstruction)) {
+        instructions.push(cleanInstruction);
+      }
+    }
+
+    // Extract ingredients
+    if (inIngredientsSection || ingredients.length < 15) {
+      ingredientRegex.lastIndex = 0;
+      let match;
+      while ((match = ingredientRegex.exec(line)) !== null) {
+        const amount = match[1].trim();
+        const unit = match[2].trim();
+        const name = match[3].trim().replace(/[^\w\s-]/g, '').trim();
+        
+        if (name.length > 1 && name.length < 50) {
+          ingredients.push({
+            name: name.charAt(0).toUpperCase() + name.slice(1),
+            amount: amount,
+            unit: unit
+          });
+        }
+      }
+    }
+  }
+
+  // Try to extract title from first few lines
+  let title = '';
+  for (const line of lines.slice(0, 10)) {
+    if (line.length > 5 && line.length < 80 && 
+        !line.toLowerCase().includes('recipe') && 
+        /^[A-Z]/.test(line) && 
+        !ingredientRegex.test(line)) {
+      title = line;
+      break;
+    }
+  }
+
+  console.log(`Basic extraction found: ${instructions.length} instructions, ${ingredients.length} ingredients`);
+
+  return {
+    success: true,
+    title: title || 'Extracted Recipe',
+    description: 'Recipe extracted using fallback method (OpenAI quota exceeded)',
+    instructions: instructions.slice(0, 15),
+    ingredients: ingredients.slice(0, 20),
+    cookTime: 0,
+    servings: 1,
+    image: undefined
+  };
 }
