@@ -224,89 +224,141 @@ function basicRecipeExtraction(content: string): RecipeExtractionResult {
   const ingredients: Array<{ name: string; amount: string; unit: string }> = [];
   
   console.log('Using basic extraction fallback');
+  console.log('Content sample:', content.substring(0, 500));
   
-  // Split content into lines
-  const lines = content.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+  // Split content into lines and filter out very short lines
+  const lines = content.split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 5);
+  
+  console.log('Total lines to process:', lines.length);
   
   // Look for numbered instructions or action words
   const instructionKeywords = [
     'heat', 'cook', 'bake', 'fry', 'boil', 'simmer', 'mix', 'stir', 'add', 
     'combine', 'whisk', 'blend', 'chop', 'dice', 'slice', 'melt', 'pour',
-    'season', 'serve', 'preheat', 'remove', 'transfer', 'cover'
+    'season', 'serve', 'preheat', 'remove', 'transfer', 'cover', 'prepare',
+    'place', 'drain', 'rinse', 'cut', 'wash', 'peel', 'grate', 'sprinkle'
   ];
 
-  // Enhanced ingredient detection
-  const ingredientRegex = /(\d+(?:[\/\.\d]*)?)\s*(cups?|cup|tablespoons?|tbsp|teaspoons?|tsp|ounces?|oz|pounds?|lbs?|lb|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|cloves?|pieces?|slices?|large|medium|small|whole|can|cans)\s+(?:of\s+)?(.+?)(?=\n|$|,|\()/gi;
+  // More flexible ingredient detection
+  const ingredientPatterns = [
+    // Pattern like "2 cups flour" or "1 tablespoon olive oil"
+    /(\d+(?:[\/\.\d]*)?)\s*(cups?|tablespoons?|tbsp|teaspoons?|tsp|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|cloves?|pieces?|slices?)\s+(?:of\s+)?([^,\n\(]+)/gi,
+    // Pattern like "flour - 2 cups" 
+    /([a-zA-Z\s]+)\s*[-–]\s*(\d+(?:[\/\.\d]*)?)\s*(cups?|tablespoons?|tbsp|teaspoons?|tsp|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|cloves?|pieces?|slices?)/gi,
+    // Pattern like "2 large eggs" or "1 medium onion"
+    /(\d+(?:[\/\.\d]*)?)\s*(large|medium|small|whole|fresh)?\s*([a-zA-Z\s]+?)(?=\n|$|,|\()/gi
+  ];
 
-  let inIngredientsSection = false;
-  let inInstructionsSection = false;
+  let foundIngredientsCount = 0;
+  let foundInstructionsCount = 0;
 
-  for (const line of lines) {
+  // Process each line
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const lowerLine = line.toLowerCase();
     
-    // Section detection
-    if (lowerLine.includes('ingredient') || lowerLine.includes('you need') || lowerLine.includes('shopping')) {
-      inIngredientsSection = true;
-      inInstructionsSection = false;
-      continue;
-    }
+    // Skip very long lines (likely paragraphs) and very short ones
+    if (line.length < 5 || line.length > 200) continue;
     
-    if (lowerLine.includes('instruction') || lowerLine.includes('method') || lowerLine.includes('direction') || lowerLine.includes('steps')) {
-      inInstructionsSection = true;
-      inIngredientsSection = false;
-      continue;
-    }
-
-    // Extract instructions
-    if (inInstructionsSection || 
-        (/^\d+\./.test(line) && line.length > 15) ||
-        (instructionKeywords.some(keyword => lowerLine.includes(keyword)) && line.length > 20 && line.length < 300)) {
-      const cleanInstruction = line.replace(/^\d+\.\s*/, '').trim();
-      if (cleanInstruction.length > 10 && !instructions.includes(cleanInstruction)) {
-        instructions.push(cleanInstruction);
-      }
-    }
-
-    // Extract ingredients
-    if (inIngredientsSection || ingredients.length < 15) {
-      ingredientRegex.lastIndex = 0;
+    // Try to extract ingredients using multiple patterns
+    ingredientPatterns.forEach(pattern => {
+      pattern.lastIndex = 0;
       let match;
-      while ((match = ingredientRegex.exec(line)) !== null) {
-        const amount = match[1].trim();
-        const unit = match[2].trim();
-        const name = match[3].trim().replace(/[^\w\s-]/g, '').trim();
+      while ((match = pattern.exec(line)) !== null && foundIngredientsCount < 20) {
+        let amount = '', unit = '', name = '';
         
-        if (name.length > 1 && name.length < 50) {
+        // Different patterns have different capture groups
+        if (pattern.source.includes('cups?|tablespoons?')) {
+          if (match[1] && match[2] && match[3]) {
+            amount = match[1].trim();
+            unit = match[2].trim();
+            name = match[3].trim();
+          }
+        } else if (pattern.source.includes('[-–]')) {
+          if (match[1] && match[2] && match[3]) {
+            name = match[1].trim();
+            amount = match[2].trim();
+            unit = match[3].trim();
+          }
+        } else {
+          if (match[1] && match[3]) {
+            amount = match[1].trim();
+            unit = match[2] ? match[2].trim() : '';
+            name = match[3].trim();
+          }
+        }
+        
+        // Clean up the name
+        name = name.replace(/[^\w\s-]/g, '').trim();
+        
+        if (name.length > 2 && name.length < 50 && 
+            !name.toLowerCase().includes('step') &&
+            !name.toLowerCase().includes('instruction') &&
+            !instructionKeywords.some(keyword => name.toLowerCase().includes(keyword))) {
+          
           ingredients.push({
             name: name.charAt(0).toUpperCase() + name.slice(1),
-            amount: amount,
-            unit: unit
+            amount: amount || '1',
+            unit: unit || ''
           });
+          foundIngredientsCount++;
         }
+      }
+    });
+    
+    // Try to extract instructions
+    const isNumberedStep = /^\d+[\.\)]\s*/.test(line);
+    const hasInstructionWords = instructionKeywords.some(keyword => lowerLine.includes(keyword));
+    const isReasonableLength = line.length >= 15 && line.length <= 200;
+    const hasActionStructure = /\b(heat|cook|add|mix|stir|place|put|combine|whisk)\b.*\b(until|for|to|in|with|and)\b/i.test(line);
+    
+    if ((isNumberedStep || hasInstructionWords || hasActionStructure) && 
+        isReasonableLength && 
+        foundInstructionsCount < 15) {
+      
+      const cleanInstruction = line
+        .replace(/^\d+[\.\)]\s*/, '') // Remove numbering
+        .replace(/^[-•*]\s*/, '') // Remove bullet points
+        .trim();
+      
+      if (cleanInstruction.length > 10 && 
+          !instructions.some(existing => existing.toLowerCase() === cleanInstruction.toLowerCase())) {
+        instructions.push(cleanInstruction);
+        foundInstructionsCount++;
       }
     }
   }
 
-  // Try to extract title from first few lines
+  // Try to extract title - look for lines that could be titles
   let title = '';
-  for (const line of lines.slice(0, 10)) {
-    if (line.length > 5 && line.length < 80 && 
-        !line.toLowerCase().includes('recipe') && 
+  for (const line of lines.slice(0, 20)) {
+    if (line.length > 10 && line.length < 80 && 
         /^[A-Z]/.test(line) && 
-        !ingredientRegex.test(line)) {
+        !line.includes('•') &&
+        !line.includes('–') &&
+        !line.includes('Recipe') &&
+        !instructionKeywords.some(keyword => line.toLowerCase().includes(keyword)) &&
+        !ingredientPatterns.some(pattern => {
+          pattern.lastIndex = 0;
+          return pattern.test(line);
+        })) {
       title = line;
       break;
     }
   }
 
   console.log(`Basic extraction found: ${instructions.length} instructions, ${ingredients.length} ingredients`);
+  console.log('Instructions found:', instructions.slice(0, 3));
+  console.log('Ingredients found:', ingredients.slice(0, 3));
 
   return {
     success: true,
     title: title || 'Extracted Recipe',
     description: 'Recipe extracted using fallback method (OpenAI quota exceeded)',
-    instructions: instructions.slice(0, 15),
-    ingredients: ingredients.slice(0, 20),
+    instructions: instructions,
+    ingredients: ingredients,
     cookTime: 0,
     servings: 1,
     image: undefined

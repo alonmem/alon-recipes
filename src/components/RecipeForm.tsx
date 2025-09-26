@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Plus, X, ArrowLeft, Save, Trash2, Globe } from "lucide-react";
 import { RecipeExtractorService } from "@/services/recipeExtractor";
-import { useToast } from "@/components/ui/use-toast";
+import { useToast } from "@/hooks/use-toast";
 
 interface RecipeFormProps {
   recipe: Recipe;
@@ -130,42 +130,56 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
     try {
       const result = await RecipeExtractorService.extractFromUrl(formData.websiteUrl);
       
+      console.log('Extraction result:', result);
+      
       if (result.success) {
         // Update recipe with extracted data
         let updatedFields: string[] = [];
 
+        console.log('Processing extraction results:', {
+          title: result.title,
+          instructions: result.instructions?.length,
+          ingredients: result.ingredients?.length
+        });
+
         // Update title if empty and extracted
         if (!formData.title && result.title) {
+          console.log('Updating title to:', result.title);
           setFormData(prev => ({ ...prev, title: result.title! }));
           updatedFields.push('title');
         }
 
         // Update description if empty and extracted
         if (!formData.description && result.description) {
+          console.log('Updating description to:', result.description);
           setFormData(prev => ({ ...prev, description: result.description! }));
           updatedFields.push('description');
         }
 
         // Update image if empty and extracted
         if (!formData.image && result.image) {
+          console.log('Updating image to:', result.image);
           setFormData(prev => ({ ...prev, image: result.image! }));
           updatedFields.push('image');
         }
 
         // Update cook time if zero and extracted
         if (formData.cookTime === 0 && result.cookTime && result.cookTime > 0) {
+          console.log('Updating cook time to:', result.cookTime);
           setFormData(prev => ({ ...prev, cookTime: result.cookTime! }));
           updatedFields.push('cook time');
         }
 
         // Update servings if one and extracted
         if (formData.servings === 1 && result.servings && result.servings > 1) {
+          console.log('Updating servings to:', result.servings);
           setFormData(prev => ({ ...prev, servings: result.servings! }));
           updatedFields.push('servings');
         }
 
         // Add extracted instructions
         if (result.instructions && result.instructions.length > 0) {
+          console.log('Adding instructions:', result.instructions);
           setFormData(prev => ({
             ...prev,
             instructions: [...prev.instructions, ...result.instructions!]
@@ -175,6 +189,7 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
 
         // Add extracted ingredients
         if (result.ingredients && result.ingredients.length > 0) {
+          console.log('Adding ingredients:', result.ingredients);
           const newIngredients = result.ingredients.map(ing => ({
             id: `ingredient-${Date.now()}-${Math.random()}`,
             name: ing.name,
@@ -188,6 +203,8 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
           }));
           updatedFields.push(`${result.ingredients.length} ingredients`);
         }
+
+        console.log('Updated fields:', updatedFields);
 
         if (updatedFields.length > 0) {
           toast({
