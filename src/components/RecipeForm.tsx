@@ -131,12 +131,46 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
       const result = await RecipeExtractorService.extractFromUrl(formData.websiteUrl);
       
       if (result.success) {
+        // Update recipe with extracted data
+        let updatedFields: string[] = [];
+
+        // Update title if empty and extracted
+        if (!formData.title && result.title) {
+          setFormData(prev => ({ ...prev, title: result.title! }));
+          updatedFields.push('title');
+        }
+
+        // Update description if empty and extracted
+        if (!formData.description && result.description) {
+          setFormData(prev => ({ ...prev, description: result.description! }));
+          updatedFields.push('description');
+        }
+
+        // Update image if empty and extracted
+        if (!formData.image && result.image) {
+          setFormData(prev => ({ ...prev, image: result.image! }));
+          updatedFields.push('image');
+        }
+
+        // Update cook time if zero and extracted
+        if (formData.cookTime === 0 && result.cookTime && result.cookTime > 0) {
+          setFormData(prev => ({ ...prev, cookTime: result.cookTime! }));
+          updatedFields.push('cook time');
+        }
+
+        // Update servings if one and extracted
+        if (formData.servings === 1 && result.servings && result.servings > 1) {
+          setFormData(prev => ({ ...prev, servings: result.servings! }));
+          updatedFields.push('servings');
+        }
+
         // Add extracted instructions
         if (result.instructions && result.instructions.length > 0) {
           setFormData(prev => ({
             ...prev,
             instructions: [...prev.instructions, ...result.instructions!]
           }));
+          updatedFields.push(`${result.instructions.length} instructions`);
         }
 
         // Add extracted ingredients
@@ -152,12 +186,20 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
             ...prev,
             ingredients: [...prev.ingredients, ...newIngredients]
           }));
+          updatedFields.push(`${result.ingredients.length} ingredients`);
         }
 
-        toast({
-          title: "Success!",
-          description: `Extracted ${result.instructions?.length || 0} instructions and ${result.ingredients?.length || 0} ingredients`,
-        });
+        if (updatedFields.length > 0) {
+          toast({
+            title: "Recipe extracted successfully!",
+            description: `Extracted: ${updatedFields.join(', ')}`,
+          });
+        } else {
+          toast({
+            title: "Extraction complete",
+            description: "No new information found to extract",
+          });
+        }
       } else {
         toast({
           title: "Extraction failed",
