@@ -72,11 +72,11 @@ serve(async (req) => {
       throw new Error('OpenAI API key not configured');
     }
 
-    console.log('Sending content to OpenAI for analysis...');
+    console.log('Sending content to AI for analysis...');
 
-    // Try GPT-5 Nano via Responses API first
+    // Try GPT-5 Nano first
     try {
-      const gpt5Response = await fetch('https://api.openai.com/v1/responses', {
+      const gpt5Response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${openaiApiKey}`,
@@ -84,56 +84,79 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           model: 'gpt-5-nano-2025-08-07',
-          // Newer models use max_completion_tokens and do not support temperature
           max_completion_tokens: 2000,
-          input: `You are a recipe extraction expert. Extract recipe information from website content and return ONLY valid JSON with this exact structure:\n\n{\n  "title": "Recipe Name",\n  "description": "Brief description",\n  "ingredients": [\n    {"name": "ingredient name", "amount": "quantity", "unit": "measurement unit"}\n  ],\n  "instructions": ["step 1", "step 2", "step 3"],\n  "cookTime": 30,\n  "servings": 4,\n  "image": "image_url_if_found_or_null"\n}\n\nRules:\n- Extract ALL cooking steps in logical order\n- Include ALL ingredients with proper measurements\n- Convert fractions to decimals (e.g., "1/2" -> "0.5")\n- Use standard units: cups, tsp, tbsp, oz, lbs, g, kg, ml, l, pieces, cloves\n- cookTime in minutes, servings as number\n- If no clear recipe found, return {"error": "No recipe found"}\n- Return ONLY the JSON, no other text\n\nExtract the recipe from this website content:\n\n${cleanedText.substring(0, 8000)}`,
+          messages: [
+            {
+              role: 'system',
+              content: `You are a recipe extraction expert. Extract recipe information from website content and return ONLY valid JSON with this exact structure:
+
+{
+  "title": "Recipe Name",
+  "description": "Brief description",
+  "ingredients": [
+    {"name": "ingredient name", "amount": "quantity", "unit": "measurement unit"}
+  ],
+  "instructions": ["step 1", "step 2", "step 3"],
+  "cookTime": 30,
+  "servings": 4,
+  "image": "image_url_if_found_or_null"
+}
+
+Rules:
+- Extract ALL cooking steps in logical order
+- Include ALL ingredients with proper measurements
+- Convert fractions to decimals (e.g., "1/2" -> "0.5")
+- Use standard units: cups, tsp, tbsp, oz, lbs, g, kg, ml, l, pieces, cloves
+- cookTime in minutes, servings as number
+- If no clear recipe found, return {"error": "No recipe found"}
+- Return ONLY the JSON, no other text`
+            },
+            {
+              role: 'user',
+              content: `Extract the recipe from this website content:\n\n${cleanedText.substring(0, 8000)}`
+            }
+          ]
         }),
       });
 
       if (gpt5Response.ok) {
         const gpt5Data = await gpt5Response.json();
-        // Try multiple known shapes to extract text content
-        const extractedContent = gpt5Data.output_text
-          || gpt5Data?.choices?.[0]?.message?.content
-          || gpt5Data?.data?.[0]?.content?.[0]?.text
-          || '';
-        if (!extractedContent) {
-          throw new Error('No content returned by GPT-5 Nano');
-        }
+        const extractedContent = gpt5Data.choices[0].message.content.trim();
+        
+        if (extractedContent) {
+          let recipeData;
+          try {
+            const jsonContent = extractedContent.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+            recipeData = JSON.parse(jsonContent);
+          } catch (parseError) {
+            console.error('Failed to parse GPT-5 response as JSON:', parseError);
+            throw new Error('Failed to parse recipe data from GPT-5 response');
+          }
 
-        // Parse the JSON response
-        let recipeData;
-        try {
-          const jsonContent = extractedContent.replace(/```json\n?/g, '').replace(/```\n?/g, '');
-          recipeData = JSON.parse(jsonContent);
-        } catch (parseError) {
-          console.error('Failed to parse GPT-5 response as JSON:', parseError);
-          throw new Error('Failed to parse recipe data from GPT-5 response');
-        }
+          if (recipeData.error) {
+            return new Response(
+              JSON.stringify({ success: false, error: recipeData.error }),
+              { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+            );
+          }
 
-        if (recipeData.error) {
+          const result: RecipeExtractionResult = {
+            success: true,
+            title: recipeData.title,
+            description: recipeData.description,
+            ingredients: recipeData.ingredients || [],
+            instructions: recipeData.instructions || [],
+            cookTime: recipeData.cookTime || 0,
+            servings: recipeData.servings || 1,
+            image: recipeData.image || undefined,
+          };
+
+          console.log('Recipe extraction successful via GPT-5 Nano');
           return new Response(
-            JSON.stringify({ success: false, error: recipeData.error }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+            JSON.stringify(result),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
-
-        const result: RecipeExtractionResult = {
-          success: true,
-          title: recipeData.title,
-          description: recipeData.description,
-          ingredients: recipeData.ingredients || [],
-          instructions: recipeData.instructions || [],
-          cookTime: recipeData.cookTime || 0,
-          servings: recipeData.servings || 1,
-          image: recipeData.image || undefined,
-        };
-
-        console.log('Recipe extraction successful via GPT-5 Nano');
-        return new Response(
-          JSON.stringify(result),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
       } else {
         const errorText = await gpt5Response.text();
         console.error('GPT-5 Nano API error:', errorText);
@@ -141,7 +164,7 @@ serve(async (req) => {
           try {
             const errorData = JSON.parse(errorText);
             if (errorData.error?.code === 'insufficient_quota') {
-              console.log('GPT-5 Nano quota exceeded, falling back');
+              console.log('GPT-5 Nano quota exceeded, falling back to basic extraction');
               const fallbackResult = basicRecipeExtraction(cleanedText);
               return new Response(
                 JSON.stringify(fallbackResult),
@@ -150,14 +173,13 @@ serve(async (req) => {
             }
           } catch (_) {}
         }
-        // Continue to legacy model fallback
       }
     } catch (e) {
       console.error('Error calling GPT-5 Nano:', e);
-      // Continue to legacy model fallback
     }
 
-    // Legacy fallback: Chat Completions (gpt-4o)
+    // Fallback to GPT-4o if GPT-5 fails
+    console.log('Falling back to GPT-4o...');
     const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -169,7 +191,28 @@ serve(async (req) => {
         messages: [
           {
             role: 'system',
-            content: `You are a recipe extraction expert. Extract recipe information from website content and return ONLY valid JSON with this exact structure:\n\n{\n  "title": "Recipe Name",\n  "description": "Brief description",\n  "ingredients": [\n    {"name": "ingredient name", "amount": "quantity", "unit": "measurement unit"}\n  ],\n  "instructions": ["step 1", "step 2", "step 3"],\n  "cookTime": 30,\n  "servings": 4,\n  "image": "image_url_if_found_or_null"\n}\n\nRules:\n- Extract ALL cooking steps in logical order\n- Include ALL ingredients with proper measurements\n- Convert fractions to decimals (e.g., "1/2" -> "0.5")\n- Use standard units: cups, tsp, tbsp, oz, lbs, g, kg, ml, l, pieces, cloves\n- cookTime in minutes, servings as number\n- If no clear recipe found, return {"error": "No recipe found"}\n- Return ONLY the JSON, no other text`
+            content: `You are a recipe extraction expert. Extract recipe information from website content and return ONLY valid JSON with this exact structure:
+
+{
+  "title": "Recipe Name",
+  "description": "Brief description",
+  "ingredients": [
+    {"name": "ingredient name", "amount": "quantity", "unit": "measurement unit"}
+  ],
+  "instructions": ["step 1", "step 2", "step 3"],
+  "cookTime": 30,
+  "servings": 4,
+  "image": "image_url_if_found_or_null"
+}
+
+Rules:
+- Extract ALL cooking steps in logical order
+- Include ALL ingredients with proper measurements
+- Convert fractions to decimals (e.g., "1/2" -> "0.5")
+- Use standard units: cups, tsp, tbsp, oz, lbs, g, kg, ml, l, pieces, cloves
+- cookTime in minutes, servings as number
+- If no clear recipe found, return {"error": "No recipe found"}
+- Return ONLY the JSON, no other text`
           },
           {
             role: 'user',
@@ -187,16 +230,17 @@ serve(async (req) => {
       
       // Handle quota exceeded error specifically
       if (openaiResponse.status === 429) {
-        const errorData = JSON.parse(errorText);
-        if (errorData.error?.code === 'insufficient_quota') {
-          console.log('OpenAI quota exceeded, falling back to basic extraction');
-          // Fall back to basic HTML parsing
-          const fallbackResult = basicRecipeExtraction(cleanedText);
-          return new Response(
-            JSON.stringify(fallbackResult),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
+        try {
+          const errorData = JSON.parse(errorText);
+          if (errorData.error?.code === 'insufficient_quota') {
+            console.log('OpenAI quota exceeded, falling back to basic extraction');
+            const fallbackResult = basicRecipeExtraction(cleanedText);
+            return new Response(
+              JSON.stringify(fallbackResult),
+              { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+        } catch (_) {}
       }
       
       throw new Error(`OpenAI API error: ${openaiResponse.status}`);
@@ -265,6 +309,127 @@ serve(async (req) => {
   }
 });
 
+function extractRecipeFromJsonLd(html: string): Omit<RecipeExtractionResult, 'success' | 'error'> | null {
+  try {
+    const scriptRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    let match;
+    while ((match = scriptRegex.exec(html)) !== null) {
+      const jsonText = match[1].trim();
+      const candidates: any[] = [];
+      try {
+        const parsed = JSON.parse(jsonText);
+        if (Array.isArray(parsed)) {
+          candidates.push(...parsed);
+        } else {
+          candidates.push(parsed);
+        }
+      } catch (_) {
+        const parts = jsonText.split(/}\s*,\s*{+/).map((p) => p.trim());
+        for (const p of parts) {
+          try {
+            const fixed = p.startsWith('{') ? p : '{' + p;
+            const final = fixed.endsWith('}') ? fixed : fixed + '}';
+            candidates.push(JSON.parse(final));
+          } catch (_) {}
+        }
+      }
+
+      for (const c of candidates) {
+        const obj = c['@graph'] ? (c['@graph'].find((n: any) => (Array.isArray(n['@type']) ? n['@type'].includes('Recipe') : n['@type'] === 'Recipe'))) : c;
+        const type = obj?.['@type'];
+        const isRecipe = Array.isArray(type) ? type.includes('Recipe') : type === 'Recipe';
+        if (!isRecipe) continue;
+
+        const title = obj.name || obj.headline || undefined;
+        const description = obj.description || undefined;
+        const image = Array.isArray(obj.image) ? obj.image[0] : (typeof obj.image === 'object' ? obj.image?.url : obj.image);
+
+        const ingredientLines: string[] = Array.isArray(obj.recipeIngredient) ? obj.recipeIngredient : [];
+        const ingredients = ingredientLines
+          .map((line: string) => normalizeIngredient(line))
+          .filter(Boolean) as Array<{ name: string; amount: string; unit: string }>;
+
+        let instructions: string[] = [];
+        if (Array.isArray(obj.recipeInstructions)) {
+          instructions = obj.recipeInstructions.map((step: any) => typeof step === 'string' ? step : (step?.text || '')).filter((s: string) => s && s.length > 3);
+        } else if (typeof obj.recipeInstructions === 'string') {
+          instructions = obj.recipeInstructions.split(/\n+|\r+/).map((s: string) => s.trim()).filter((s: string) => s.length > 3);
+        }
+
+        const cookTime = obj.totalTime ? parseIsoDurationToMinutes(obj.totalTime) : (obj.cookTime ? parseIsoDurationToMinutes(obj.cookTime) : 0);
+        const servings = obj.recipeYield ? parseServings(obj.recipeYield) : 1;
+
+        return {
+          title,
+          description,
+          ingredients,
+          instructions,
+          cookTime,
+          servings,
+          image,
+        };
+      }
+    }
+  } catch (e) {
+    console.error('Error parsing JSON-LD:', e);
+  }
+  return null;
+}
+
+function parseIsoDurationToMinutes(iso: string): number {
+  if (!iso || typeof iso !== 'string') return 0;
+  const match = iso.match(/P(?:\d+Y)?(?:\d+M)?(?:\d+D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/i);
+  if (!match) return 0;
+  const hours = parseInt(match[1] || '0', 10);
+  const minutes = parseInt(match[2] || '0', 10);
+  const seconds = parseInt(match[3] || '0', 10);
+  return hours * 60 + minutes + Math.round(seconds / 60);
+}
+
+function parseServings(yieldVal: any): number {
+  if (typeof yieldVal === 'number') return yieldVal;
+  if (typeof yieldVal === 'string') {
+    const m = yieldVal.match(/\d+/);
+    if (m) return parseInt(m[0], 10);
+  }
+  return 1;
+}
+
+function normalizeIngredient(line: string): { name: string; amount: string; unit: string } | null {
+  if (!line) return null;
+  const text = line.replace(/\s+/g, ' ').trim();
+  const fracToDec = (s: string) => {
+    const parts = s.split(' ');
+    let total = 0;
+    for (const p of parts) {
+      if (/^\d+$/.test(p)) total += parseFloat(p);
+      else if (/^\d+\/\d+$/.test(p)) {
+        const [a, b] = p.split('/').map(Number);
+        if (b) total += a / b;
+      }
+    }
+    return total ? String(parseFloat(total.toFixed(2))) : s;
+  };
+
+  const pattern = /(\d+[\d\s\/\.]*)\s*(cups?|cup|tablespoons?|tbsp|teaspoons?|tsp|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|cloves?|pieces?|slices?)?\s*(.*)/i;
+  const m = text.match(pattern);
+  if (m) {
+    const amount = fracToDec((m[1] || '').trim());
+    const unit = (m[2] || '').trim();
+    let name = (m[3] || '').trim();
+    name = name.replace(/^of\s+/i, '').replace(/[\(\)]/g, '').trim();
+    if (name.length < 2) return null;
+    return {
+      name: name.charAt(0).toUpperCase() + name.slice(1),
+      amount: amount || '1',
+      unit: unit || '',
+    };
+  }
+  const clean = text.replace(/[\(\)]/g, '').trim();
+  if (clean.length < 2) return null;
+  return { name: clean.charAt(0).toUpperCase() + clean.slice(1), amount: '1', unit: '' };
+}
+
 function cleanHtmlContent(html: string): string {
   // Remove script and style tags
   let cleaned = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
@@ -286,9 +451,10 @@ function cleanHtmlContent(html: string): string {
   cleaned = cleaned.replace(/&#39;/g, "'");
   cleaned = cleaned.replace(/&nbsp;/g, ' ');
   
-  // Normalize whitespace
-  cleaned = cleaned.replace(/\s+/g, ' ');
-  cleaned = cleaned.replace(/\n\s*\n/g, '\n');
+  // Normalize whitespace but preserve newlines for better parsing
+  cleaned = cleaned.replace(/[\t\f\v\r ]+/g, ' '); // collapse spaces/tabs
+  cleaned = cleaned.replace(/\n{2,}/g, '\n'); // collapse multiple blank lines
+  cleaned = cleaned.replace(/\s*\n\s*/g, '\n'); // trim around newlines
   
   return cleaned.trim();
 }
@@ -317,12 +483,9 @@ function basicRecipeExtraction(content: string): RecipeExtractionResult {
 
   // More flexible ingredient detection
   const ingredientPatterns = [
-    // Pattern like "2 cups flour" or "1 tablespoon olive oil"
-    /(\d+(?:[\/\.\d]*)?)\s*(cups?|tablespoons?|tbsp|teaspoons?|tsp|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|cloves?|pieces?|slices?)\s+(?:of\s+)?([^,\n\(]+)/gi,
-    // Pattern like "flour - 2 cups" 
-    /([a-zA-Z\s]+)\s*[-–]\s*(\d+(?:[\/\.\d]*)?)\s*(cups?|tablespoons?|tbsp|teaspoons?|tsp|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|cloves?|pieces?|slices?)/gi,
-    // Pattern like "2 large eggs" or "1 medium onion"
-    /(\d+(?:[\/\.\d]*)?)\s*(large|medium|small|whole|fresh)?\s*([a-zA-Z\s]+?)(?=\n|$|,|\()/gi
+    /(\d+(?:[\/.\d]*)?)\s*(cups?|tablespoons?|tbsp|teaspoons?|tsp|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|cloves?|pieces?|slices?)\s+(?:of\s+)?([^,\n\(]+)/gi,
+    /([a-zA-Z\s]+)\s*[-–]\s*(\d+(?:[\/.\d]*)?)\s*(cups?|tablespoons?|tbsp|teaspoons?|tsp|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|cloves?|pieces?|slices?)/gi,
+    /(\d+(?:[\/.\d]*)?)\s*(large|medium|small|whole|fresh)?\s*([a-zA-Z\s]+?)(?=\n|$|,|\()/gi
   ];
 
   let foundIngredientsCount = 0;
@@ -340,10 +503,9 @@ function basicRecipeExtraction(content: string): RecipeExtractionResult {
     ingredientPatterns.forEach(pattern => {
       pattern.lastIndex = 0;
       let match;
-      while ((match = pattern.exec(line)) !== null && foundIngredientsCount < 20) {
+      while ((match = pattern.exec(line)) !== null && foundIngredientsCount < 25) {
         let amount = '', unit = '', name = '';
         
-        // Different patterns have different capture groups
         if (pattern.source.includes('cups?|tablespoons?')) {
           if (match[1] && match[2] && match[3]) {
             amount = match[1].trim();
@@ -364,7 +526,6 @@ function basicRecipeExtraction(content: string): RecipeExtractionResult {
           }
         }
         
-        // Clean up the name
         name = name.replace(/[^\w\s-]/g, '').trim();
         
         if (name.length > 2 && name.length < 50 && 
@@ -390,11 +551,11 @@ function basicRecipeExtraction(content: string): RecipeExtractionResult {
     
     if ((isNumberedStep || hasInstructionWords || hasActionStructure) && 
         isReasonableLength && 
-        foundInstructionsCount < 15) {
+        foundInstructionsCount < 20) {
       
       const cleanInstruction = line
-        .replace(/^\d+[\.\)]\s*/, '') // Remove numbering
-        .replace(/^[-•*]\s*/, '') // Remove bullet points
+        .replace(/^\d+[\.\)]\s*/, '')
+        .replace(/^[-•*]\s*/, '')
         .trim();
       
       if (cleanInstruction.length > 10 && 
@@ -407,12 +568,12 @@ function basicRecipeExtraction(content: string): RecipeExtractionResult {
 
   // Try to extract title - look for lines that could be titles
   let title = '';
-  for (const line of lines.slice(0, 20)) {
+  for (const line of lines.slice(0, 40)) {
     if (line.length > 10 && line.length < 80 && 
         /^[A-Z]/.test(line) && 
         !line.includes('•') &&
         !line.includes('–') &&
-        !line.includes('Recipe') &&
+        !/recipe/i.test(line) &&
         !instructionKeywords.some(keyword => line.toLowerCase().includes(keyword)) &&
         !ingredientPatterns.some(pattern => {
           pattern.lastIndex = 0;
@@ -430,9 +591,9 @@ function basicRecipeExtraction(content: string): RecipeExtractionResult {
   return {
     success: true,
     title: title || 'Extracted Recipe',
-    description: 'Recipe extracted using fallback method (OpenAI quota exceeded)',
-    instructions: instructions,
-    ingredients: ingredients,
+    description: 'Recipe extracted using non-AI fallback method',
+    instructions,
+    ingredients,
     cookTime: 0,
     servings: 1,
     image: undefined
