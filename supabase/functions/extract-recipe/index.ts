@@ -52,10 +52,21 @@ serve(async (req) => {
     const htmlContent = await websiteResponse.text();
     console.log('Website content fetched, length:', htmlContent.length);
 
-    // Clean HTML and extract meaningful text
+    // Try JSON-LD (schema.org Recipe) extraction first
+    const jsonLd = extractRecipeFromJsonLd(htmlContent);
+    if (jsonLd) {
+      console.log('Recipe found via JSON-LD');
+      const result: RecipeExtractionResult = { success: true, ...jsonLd };
+      return new Response(
+        JSON.stringify(result),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Clean HTML and extract meaningful text for AI/basic fallback
     const cleanedText = cleanHtmlContent(htmlContent);
     
-    // Use OpenAI to extract recipe information
+    // Use AI to extract recipe information
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
     if (!openaiApiKey) {
       throw new Error('OpenAI API key not configured');
@@ -63,6 +74,90 @@ serve(async (req) => {
 
     console.log('Sending content to OpenAI for analysis...');
 
+    // Try GPT-5 Nano via Responses API first
+    try {
+      const gpt5Response = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-5-nano-2025-08-07',
+          // Newer models use max_completion_tokens and do not support temperature
+          max_completion_tokens: 2000,
+          input: `You are a recipe extraction expert. Extract recipe information from website content and return ONLY valid JSON with this exact structure:\n\n{\n  "title": "Recipe Name",\n  "description": "Brief description",\n  "ingredients": [\n    {"name": "ingredient name", "amount": "quantity", "unit": "measurement unit"}\n  ],\n  "instructions": ["step 1", "step 2", "step 3"],\n  "cookTime": 30,\n  "servings": 4,\n  "image": "image_url_if_found_or_null"\n}\n\nRules:\n- Extract ALL cooking steps in logical order\n- Include ALL ingredients with proper measurements\n- Convert fractions to decimals (e.g., "1/2" -> "0.5")\n- Use standard units: cups, tsp, tbsp, oz, lbs, g, kg, ml, l, pieces, cloves\n- cookTime in minutes, servings as number\n- If no clear recipe found, return {"error": "No recipe found"}\n- Return ONLY the JSON, no other text\n\nExtract the recipe from this website content:\n\n${cleanedText.substring(0, 8000)}`,
+        }),
+      });
+
+      if (gpt5Response.ok) {
+        const gpt5Data = await gpt5Response.json();
+        // Try multiple known shapes to extract text content
+        const extractedContent = gpt5Data.output_text
+          || gpt5Data?.choices?.[0]?.message?.content
+          || gpt5Data?.data?.[0]?.content?.[0]?.text
+          || '';
+        if (!extractedContent) {
+          throw new Error('No content returned by GPT-5 Nano');
+        }
+
+        // Parse the JSON response
+        let recipeData;
+        try {
+          const jsonContent = extractedContent.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+          recipeData = JSON.parse(jsonContent);
+        } catch (parseError) {
+          console.error('Failed to parse GPT-5 response as JSON:', parseError);
+          throw new Error('Failed to parse recipe data from GPT-5 response');
+        }
+
+        if (recipeData.error) {
+          return new Response(
+            JSON.stringify({ success: false, error: recipeData.error }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+          );
+        }
+
+        const result: RecipeExtractionResult = {
+          success: true,
+          title: recipeData.title,
+          description: recipeData.description,
+          ingredients: recipeData.ingredients || [],
+          instructions: recipeData.instructions || [],
+          cookTime: recipeData.cookTime || 0,
+          servings: recipeData.servings || 1,
+          image: recipeData.image || undefined,
+        };
+
+        console.log('Recipe extraction successful via GPT-5 Nano');
+        return new Response(
+          JSON.stringify(result),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } else {
+        const errorText = await gpt5Response.text();
+        console.error('GPT-5 Nano API error:', errorText);
+        if (gpt5Response.status === 429) {
+          try {
+            const errorData = JSON.parse(errorText);
+            if (errorData.error?.code === 'insufficient_quota') {
+              console.log('GPT-5 Nano quota exceeded, falling back');
+              const fallbackResult = basicRecipeExtraction(cleanedText);
+              return new Response(
+                JSON.stringify(fallbackResult),
+                { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+              );
+            }
+          } catch (_) {}
+        }
+        // Continue to legacy model fallback
+      }
+    } catch (e) {
+      console.error('Error calling GPT-5 Nano:', e);
+      // Continue to legacy model fallback
+    }
+
+    // Legacy fallback: Chat Completions (gpt-4o)
     const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -74,28 +169,7 @@ serve(async (req) => {
         messages: [
           {
             role: 'system',
-            content: `You are a recipe extraction expert. Extract recipe information from website content and return ONLY valid JSON with this exact structure:
-            
-{
-  "title": "Recipe Name",
-  "description": "Brief description",
-  "ingredients": [
-    {"name": "ingredient name", "amount": "quantity", "unit": "measurement unit"}
-  ],
-  "instructions": ["step 1", "step 2", "step 3"],
-  "cookTime": 30,
-  "servings": 4,
-  "image": "image_url_if_found_or_null"
-}
-
-Rules:
-- Extract ALL cooking steps in logical order
-- Include ALL ingredients with proper measurements
-- Convert fractions to decimals (e.g., "1/2" -> "0.5")
-- Use standard units: cups, tsp, tbsp, oz, lbs, g, kg, ml, l, pieces, cloves
-- cookTime in minutes, servings as number
-- If no clear recipe found, return {"error": "No recipe found"}
-- Return ONLY the JSON, no other text`
+            content: `You are a recipe extraction expert. Extract recipe information from website content and return ONLY valid JSON with this exact structure:\n\n{\n  "title": "Recipe Name",\n  "description": "Brief description",\n  "ingredients": [\n    {"name": "ingredient name", "amount": "quantity", "unit": "measurement unit"}\n  ],\n  "instructions": ["step 1", "step 2", "step 3"],\n  "cookTime": 30,\n  "servings": 4,\n  "image": "image_url_if_found_or_null"\n}\n\nRules:\n- Extract ALL cooking steps in logical order\n- Include ALL ingredients with proper measurements\n- Convert fractions to decimals (e.g., "1/2" -> "0.5")\n- Use standard units: cups, tsp, tbsp, oz, lbs, g, kg, ml, l, pieces, cloves\n- cookTime in minutes, servings as number\n- If no clear recipe found, return {"error": "No recipe found"}\n- Return ONLY the JSON, no other text`
           },
           {
             role: 'user',
