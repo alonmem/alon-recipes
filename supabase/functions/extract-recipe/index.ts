@@ -87,8 +87,8 @@ serve(async (req) => {
           max_completion_tokens: 2000,
           messages: [
             {
-              role: 'system',
-              content: `You are a recipe extraction expert. Extract recipe information from website content and return ONLY valid JSON with this exact structure:
+            role: 'system',
+            content: `You are a recipe extraction expert. Extract recipe information from website content and return ONLY valid JSON with this exact structure:
 
 {
   "title": "Recipe Name",
@@ -102,8 +102,16 @@ serve(async (req) => {
   "image": "image_url_if_found_or_null"
 }
 
-Rules:
-- Extract ALL cooking steps in logical order
+CRITICAL RULES for Instructions:
+- Extract ALL cooking steps in logical order, including preparation steps
+- Look for sections titled "Instructions", "Directions", "Method", "Steps", "Preparation"
+- Include bullet points, numbered steps, and any cooking actions
+- Combine related sub-steps if they're part of the same process
+- Include timing information when mentioned (e.g., "roast for 45 minutes")
+- Include temperature settings (e.g., "preheat oven to 375F")
+- Keep each instruction complete and clear
+
+Other Rules:
 - Include ALL ingredients with proper measurements
 - Convert fractions to decimals (e.g., "1/2" -> "0.5")
 - Use standard units: cups, tsp, tbsp, oz, lbs, g, kg, ml, l, pieces, cloves
@@ -205,8 +213,16 @@ Rules:
   "image": "image_url_if_found_or_null"
 }
 
-Rules:
-- Extract ALL cooking steps in logical order
+CRITICAL RULES for Instructions:
+- Extract ALL cooking steps in logical order, including preparation steps
+- Look for sections titled "Instructions", "Directions", "Method", "Steps", "Preparation"
+- Include bullet points, numbered steps, and any cooking actions
+- Combine related sub-steps if they're part of the same process
+- Include timing information when mentioned (e.g., "roast for 45 minutes")
+- Include temperature settings (e.g., "preheat oven to 375F")
+- Keep each instruction complete and clear
+
+Other Rules:
 - Include ALL ingredients with proper measurements
 - Convert fractions to decimals (e.g., "1/2" -> "0.5")
 - Use standard units: cups, tsp, tbsp, oz, lbs, g, kg, ml, l, pieces, cloves
@@ -473,14 +489,18 @@ function basicRecipeExtraction(content: string): RecipeExtractionResult {
   
   console.log('Total lines to process:', lines.length);
   
-  // Look for numbered instructions or action words
+  // Look for instruction sections and step patterns
   const instructionKeywords = [
     'heat', 'cook', 'bake', 'fry', 'boil', 'simmer', 'mix', 'stir', 'add', 
     'combine', 'whisk', 'blend', 'chop', 'dice', 'slice', 'melt', 'pour',
     'season', 'serve', 'preheat', 'remove', 'transfer', 'cover', 'prepare',
-    'place', 'drain', 'rinse', 'cut', 'wash', 'peel', 'grate', 'sprinkle'
+    'place', 'drain', 'rinse', 'cut', 'wash', 'peel', 'grate', 'sprinkle',
+    'roast', 'toast', 'wrap', 'trim', 'arrange', 'drizzle', 'toss'
   ];
 
+  // Instruction section indicators
+  const instructionSectionWords = ['instructions', 'directions', 'method', 'preparation', 'steps'];
+  
   // More flexible ingredient detection
   const ingredientPatterns = [
     /(\d+(?:[\/.\d]*)?)\s*(cups?|tablespoons?|tbsp|teaspoons?|tsp|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l|cloves?|pieces?|slices?)\s+(?:of\s+)?([^,\n\(]+)/gi,
@@ -490,79 +510,109 @@ function basicRecipeExtraction(content: string): RecipeExtractionResult {
 
   let foundIngredientsCount = 0;
   let foundInstructionsCount = 0;
+  let inInstructionSection = false;
 
-  // Process each line
+  // Process each line with context awareness
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const lowerLine = line.toLowerCase();
     
     // Skip very long lines (likely paragraphs) and very short ones
-    if (line.length < 5 || line.length > 200) continue;
+    if (line.length < 5 || line.length > 300) continue;
     
-    // Try to extract ingredients using multiple patterns
-    ingredientPatterns.forEach(pattern => {
-      pattern.lastIndex = 0;
-      let match;
-      while ((match = pattern.exec(line)) !== null && foundIngredientsCount < 25) {
-        let amount = '', unit = '', name = '';
-        
-        if (pattern.source.includes('cups?|tablespoons?')) {
-          if (match[1] && match[2] && match[3]) {
-            amount = match[1].trim();
-            unit = match[2].trim();
-            name = match[3].trim();
-          }
-        } else if (pattern.source.includes('[-–]')) {
-          if (match[1] && match[2] && match[3]) {
-            name = match[1].trim();
-            amount = match[2].trim();
-            unit = match[3].trim();
-          }
-        } else {
-          if (match[1] && match[3]) {
-            amount = match[1].trim();
-            unit = match[2] ? match[2].trim() : '';
-            name = match[3].trim();
-          }
-        }
-        
-        name = name.replace(/[^\w\s-]/g, '').trim();
-        
-        if (name.length > 2 && name.length < 50 && 
-            !name.toLowerCase().includes('step') &&
-            !name.toLowerCase().includes('instruction') &&
-            !instructionKeywords.some(keyword => name.toLowerCase().includes(keyword))) {
-          
-          ingredients.push({
-            name: name.charAt(0).toUpperCase() + name.slice(1),
-            amount: amount || '1',
-            unit: unit || ''
-          });
-          foundIngredientsCount++;
-        }
-      }
-    });
+    // Check if we're entering an instruction section
+    if (instructionSectionWords.some(word => lowerLine.includes(word)) && 
+        (lowerLine.includes('##') || lowerLine.includes('###') || line.length < 50)) {
+      inInstructionSection = true;
+      console.log('Found instruction section:', line);
+      continue;
+    }
     
-    // Try to extract instructions
+    // Check if we're leaving instruction section (new major section)
+    if (inInstructionSection && 
+        (lowerLine.includes('nutrition') || lowerLine.includes('notes') || 
+         lowerLine.includes('video') || lowerLine.includes('comments'))) {
+      inInstructionSection = false;
+    }
+    
+    // Extract instructions with higher priority if in instruction section
+    const isBulletPoint = /^\s*[-•*]\s+/.test(line);
     const isNumberedStep = /^\d+[\.\)]\s*/.test(line);
     const hasInstructionWords = instructionKeywords.some(keyword => lowerLine.includes(keyword));
-    const isReasonableLength = line.length >= 15 && line.length <= 200;
-    const hasActionStructure = /\b(heat|cook|add|mix|stir|place|put|combine|whisk)\b.*\b(until|for|to|in|with|and)\b/i.test(line);
+    const isReasonableLength = line.length >= 15 && line.length <= 300;
+    const hasActionStructure = /\b(heat|cook|add|mix|stir|place|put|combine|whisk|roast|toast|wrap|trim|arrange|drizzle|toss|preheat|remove)\b.*\b(until|for|to|in|with|and|then|so)\b/i.test(line);
     
-    if ((isNumberedStep || hasInstructionWords || hasActionStructure) && 
+    // Instructions are more likely if:
+    // 1. We're in an instruction section, OR
+    // 2. It's a numbered/bulleted step, OR  
+    // 3. It has cooking action words AND structure
+    if (((inInstructionSection && (isBulletPoint || hasInstructionWords)) || 
+         isNumberedStep || 
+         (hasInstructionWords && hasActionStructure)) && 
         isReasonableLength && 
-        foundInstructionsCount < 20) {
+        foundInstructionsCount < 25) {
       
-      const cleanInstruction = line
-        .replace(/^\d+[\.\)]\s*/, '')
-        .replace(/^[-•*]\s*/, '')
+      let cleanInstruction = line
+        .replace(/^\s*[-•*]\s*/, '') // Remove bullet points
+        .replace(/^\d+[\.\)]\s*/, '') // Remove numbering
+        .replace(/^#+\s*/, '') // Remove markdown headers
         .trim();
       
-      if (cleanInstruction.length > 10 && 
+      // Skip if it looks like a section header or too short
+      if (cleanInstruction.length > 15 && 
+          !cleanInstruction.toLowerCase().includes('roasting') && // Skip section headers
+          !cleanInstruction.toLowerCase().includes('to make') &&
           !instructions.some(existing => existing.toLowerCase() === cleanInstruction.toLowerCase())) {
         instructions.push(cleanInstruction);
         foundInstructionsCount++;
+        console.log('Found instruction:', cleanInstruction.substring(0, 50) + '...');
       }
+    }
+    
+    // Extract ingredients (existing logic)
+    if (!inInstructionSection) { // Don't extract ingredients from instruction sections
+      ingredientPatterns.forEach(pattern => {
+        pattern.lastIndex = 0;
+        let match;
+        while ((match = pattern.exec(line)) !== null && foundIngredientsCount < 25) {
+          let amount = '', unit = '', name = '';
+          
+          if (pattern.source.includes('cups?|tablespoons?')) {
+            if (match[1] && match[2] && match[3]) {
+              amount = match[1].trim();
+              unit = match[2].trim();
+              name = match[3].trim();
+            }
+          } else if (pattern.source.includes('[-–]')) {
+            if (match[1] && match[2] && match[3]) {
+              name = match[1].trim();
+              amount = match[2].trim();
+              unit = match[3].trim();
+            }
+          } else {
+            if (match[1] && match[3]) {
+              amount = match[1].trim();
+              unit = match[2] ? match[2].trim() : '';
+              name = match[3].trim();
+            }
+          }
+          
+          name = name.replace(/[^\w\s-]/g, '').trim();
+          
+          if (name.length > 2 && name.length < 50 && 
+              !name.toLowerCase().includes('step') &&
+              !name.toLowerCase().includes('instruction') &&
+              !instructionKeywords.some(keyword => name.toLowerCase().includes(keyword))) {
+            
+            ingredients.push({
+              name: name.charAt(0).toUpperCase() + name.slice(1),
+              amount: amount || '1',
+              unit: unit || ''
+            });
+            foundIngredientsCount++;
+          }
+        }
+      });
     }
   }
 
