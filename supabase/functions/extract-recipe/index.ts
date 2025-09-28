@@ -54,13 +54,25 @@ serve(async (req) => {
 
     // Try JSON-LD (schema.org Recipe) extraction first
     const jsonLd = extractRecipeFromJsonLd(htmlContent);
-    if (jsonLd) {
-      console.log('Recipe found via JSON-LD');
+    if (jsonLd && jsonLd.instructions && jsonLd.instructions.length > 0) {
+      console.log('Recipe found via JSON-LD with instructions');
       const result: RecipeExtractionResult = { success: true, ...jsonLd };
       return new Response(
         JSON.stringify(result),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    } else if (jsonLd) {
+      console.log('Recipe found via JSON-LD but missing instructions, enhancing with AI...');
+      // Use JSON-LD data as base but enhance instructions with AI
+      const cleanedText = cleanHtmlContent(htmlContent);
+      const enhancedRecipe = await enhanceRecipeWithAI(jsonLd, cleanedText);
+      if (enhancedRecipe) {
+        const result: RecipeExtractionResult = { success: true, ...enhancedRecipe };
+        return new Response(
+          JSON.stringify(result),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     // Clean HTML and extract meaningful text for AI/basic fallback
@@ -444,6 +456,70 @@ function normalizeIngredient(line: string): { name: string; amount: string; unit
   const clean = text.replace(/[\(\)]/g, '').trim();
   if (clean.length < 2) return null;
   return { name: clean.charAt(0).toUpperCase() + clean.slice(1), amount: '1', unit: '' };
+}
+
+async function enhanceRecipeWithAI(baseRecipe: any, cleanedText: string): Promise<Omit<RecipeExtractionResult, 'success' | 'error'> | null> {
+  const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
+  if (!openaiApiKey) return null;
+  
+  try {
+    console.log('Enhancing recipe with AI for missing instructions...');
+    
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-5-nano-2025-08-07',
+        max_completion_tokens: 1500,
+        messages: [
+          {
+            role: 'system',
+            content: `Extract ONLY the cooking instructions from the website content. Return ONLY a JSON array of instruction steps.
+
+Format: ["step 1", "step 2", "step 3"]
+
+Rules:
+- Extract ALL cooking steps in logical order
+- Look for sections titled "Instructions", "Directions", "Method", "Steps"
+- Include preparation steps, cooking temperatures, and timing
+- Keep each instruction clear and complete
+- Return ONLY the JSON array, no additional text`
+          },
+          {
+            role: 'user',
+            content: `Extract instructions for "${baseRecipe.title}" from this content:\n\n${cleanedText.substring(0, 6000)}`
+          }
+        ]
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const instructionsContent = data.choices[0].message.content.trim();
+      
+      try {
+        const jsonContent = instructionsContent.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+        const instructions = JSON.parse(jsonContent);
+        
+        if (Array.isArray(instructions) && instructions.length > 0) {
+          console.log(`Enhanced recipe with ${instructions.length} instructions`);
+          return {
+            ...baseRecipe,
+            instructions: instructions
+          };
+        }
+      } catch (parseError) {
+        console.error('Failed to parse AI instructions:', parseError);
+      }
+    }
+  } catch (error) {
+    console.error('Error enhancing recipe with AI:', error);
+  }
+  
+  return null;
 }
 
 function cleanHtmlContent(html: string): string {
