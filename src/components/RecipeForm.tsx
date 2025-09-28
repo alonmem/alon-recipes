@@ -137,45 +137,9 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
         let updatedFields: string[] = [];
 
         console.log('Processing extraction results:', {
-          title: result.title,
           instructions: result.instructions?.length,
           ingredients: result.ingredients?.length
         });
-
-        // Update title if empty and extracted
-        if (!formData.title && result.title) {
-          console.log('Updating title to:', result.title);
-          setFormData(prev => ({ ...prev, title: result.title! }));
-          updatedFields.push('title');
-        }
-
-        // Update description if empty and extracted
-        if (!formData.description && result.description) {
-          console.log('Updating description to:', result.description);
-          setFormData(prev => ({ ...prev, description: result.description! }));
-          updatedFields.push('description');
-        }
-
-        // Update image if empty and extracted
-        if (!formData.image && result.image) {
-          console.log('Updating image to:', result.image);
-          setFormData(prev => ({ ...prev, image: result.image! }));
-          updatedFields.push('image');
-        }
-
-        // Update cook time if zero and extracted
-        if (formData.cookTime === 0 && result.cookTime && result.cookTime > 0) {
-          console.log('Updating cook time to:', result.cookTime);
-          setFormData(prev => ({ ...prev, cookTime: result.cookTime! }));
-          updatedFields.push('cook time');
-        }
-
-        // Update servings if one and extracted
-        if (formData.servings === 1 && result.servings && result.servings > 1) {
-          console.log('Updating servings to:', result.servings);
-          setFormData(prev => ({ ...prev, servings: result.servings! }));
-          updatedFields.push('servings');
-        }
 
         // Add extracted instructions
         if (result.instructions && result.instructions.length > 0) {
@@ -187,14 +151,14 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
           updatedFields.push(`${result.instructions.length} instructions`);
         }
 
-        // Add extracted ingredients
+        // Add extracted ingredients (convert from simple strings to structured format)
         if (result.ingredients && result.ingredients.length > 0) {
           console.log('Adding ingredients:', result.ingredients);
-          const newIngredients = result.ingredients.map(ing => ({
+          const newIngredients = result.ingredients.map((ingredient: string) => ({
             id: `ingredient-${Date.now()}-${Math.random()}`,
-            name: ing.name,
-            amount: ing.amount,
-            unit: ing.unit
+            name: ingredient, // Keep full description as name since AI formatted it properly
+            amount: '', // Amount is included in the name string
+            unit: ''   // Unit is included in the name string
           }));
           
           setFormData(prev => ({
@@ -209,20 +173,17 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
         if (updatedFields.length > 0) {
           toast({
             title: "Recipe extracted successfully!",
-            description: `Extracted: ${updatedFields.join(', ')}`,
+            description: `Added: ${updatedFields.join(', ')}`,
           });
         } else {
           toast({
-            title: "Extraction complete",
-            description: "No new information found to extract",
+            title: "Extraction completed",
+            description: "No new content was found to add to the recipe",
+            variant: "destructive"
           });
         }
       } else {
-        toast({
-          title: "Extraction failed",
-          description: result.error || "Could not extract recipe information from the website",
-          variant: "destructive",
-        });
+        throw new Error(result.error || 'Failed to extract recipe');
       }
     } catch (error) {
       toast({

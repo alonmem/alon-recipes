@@ -2,13 +2,8 @@ import { supabase } from '@/integrations/supabase/client';
 
 interface RecipeExtractionResult {
   success: boolean;
-  title?: string;
-  description?: string;
   instructions?: string[];
-  ingredients?: Array<{ name: string; amount: string; unit: string }>;
-  cookTime?: number;
-  servings?: number;
-  image?: string;
+  ingredients?: string[];
   error?: string;
 }
 
@@ -35,13 +30,8 @@ export class RecipeExtractorService {
 
       return {
         success: true,
-        title: data.title,
-        description: data.description,
         instructions: data.instructions || [],
-        ingredients: data.ingredients || [],
-        cookTime: data.cookTime || 0,
-        servings: data.servings || 1,
-        image: data.image
+        ingredients: data.ingredients || []
       };
     } catch (error) {
       console.error('Error extracting recipe from URL:', error);
