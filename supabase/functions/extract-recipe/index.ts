@@ -47,7 +47,22 @@ serve(async (req) => {
     const htmlContent = await websiteResponse.text();
     console.log('Website content fetched, length:', htmlContent.length);
 
-    // Clean HTML and extract meaningful text for AI analysis
+    // Try structured data (JSON-LD) first for exact ingredients/instructions
+    const jsonLdResult = extractFromJsonLd(htmlContent);
+    if (jsonLdResult) {
+      const result = {
+        success: true,
+        ingredients: jsonLdResult.ingredients,
+        instructions: jsonLdResult.instructions,
+      };
+      console.log('Returning result from JSON-LD structured data:', result);
+      return new Response(
+        JSON.stringify(result),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Clean HTML and extract meaningful text for AI analysis (fallback)
     const cleanedText = cleanHtmlContent(htmlContent);
     
     // Get OpenAI API key
@@ -233,9 +248,15 @@ function cleanHtmlContent(html: string): string {
   // Remove comments
   cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, '');
   
-  // Extract text content while preserving some structure
-  cleaned = cleaned.replace(/<\/?(h[1-6]|p|div|section|article|main|li|td|th)[^>]*>/gi, '\n');
+  // Preserve list items with a dash prefix to help the AI
+  cleaned = cleaned.replace(/<li[^>]*>/gi, '\n- ');
+  cleaned = cleaned.replace(/<\/(li)[^>]*>/gi, '\n');
+
+  // Preserve block-level boundaries as newlines
+  cleaned = cleaned.replace(/<\/?(h[1-6]|p|div|section|article|main|ul|ol|td|th)[^>]*>/gi, '\n');
   cleaned = cleaned.replace(/<br[^>]*>/gi, '\n');
+  
+  // Drop remaining tags
   cleaned = cleaned.replace(/<[^>]+>/g, ' ');
   
   // Decode HTML entities
@@ -248,8 +269,116 @@ function cleanHtmlContent(html: string): string {
   
   // Normalize whitespace but preserve newlines for better parsing
   cleaned = cleaned.replace(/[\t\f\v\r ]+/g, ' '); // collapse spaces/tabs
-  cleaned = cleaned.replace(/\n{2,}/g, '\n'); // collapse multiple blank lines
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n'); // keep at most one blank line
   cleaned = cleaned.replace(/\s*\n\s*/g, '\n'); // trim around newlines
   
   return cleaned.trim();
+}
+
+// Attempt to extract ingredients/instructions from JSON-LD structured data
+function extractFromJsonLd(html: string): { ingredients: string[]; instructions: string[] } | null {
+  try {
+    const scriptRegex = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    const blocks: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = scriptRegex.exec(html)) !== null) {
+      const raw = match[1]
+        .replace(/<!\[CDATA\[/g, '')
+        .replace(/\]\]>/g, '')
+        .trim();
+      if (raw) blocks.push(raw);
+    }
+
+    for (const block of blocks) {
+      let json: unknown;
+      try {
+        json = JSON.parse(block);
+      } catch (_e) {
+        // Some sites embed multiple JSON objects concatenated; try to recover basic cases
+        continue;
+      }
+
+      const candidates: any[] = [];
+      if (Array.isArray(json)) {
+        candidates.push(...json);
+      } else if (json && typeof json === 'object') {
+        const obj: any = json;
+        if (obj['@graph'] && Array.isArray(obj['@graph'])) {
+          candidates.push(...obj['@graph']);
+        }
+        candidates.push(obj);
+      }
+
+      for (const node of candidates) {
+        if (!node || typeof node !== 'object') continue;
+        const typeField = node['@type'];
+        const isRecipe = (Array.isArray(typeField) && typeField.includes('Recipe')) || typeField === 'Recipe';
+        const hasRecipeFields = node.recipeIngredient || node.recipeInstructions;
+        if (!isRecipe && !hasRecipeFields) continue;
+
+        const ingredients: string[] = normalizeIngredients(node.recipeIngredient);
+        const instructions: string[] = normalizeInstructions(node.recipeInstructions);
+
+        if ((ingredients && ingredients.length > 0) || (instructions && instructions.length > 0)) {
+          return {
+            ingredients: ingredients || [],
+            instructions: instructions || [],
+          };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('JSON-LD extraction failed:', e);
+  }
+  return null;
+}
+
+function normalizeIngredients(raw: unknown): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .map((x) => (typeof x === 'string' ? x.trim() : ''))
+      .filter((x) => x.length > 0);
+  }
+  if (typeof raw === 'string') {
+    // Some sites provide a single string with line breaks
+    return raw
+      .split(/\r?\n|<br\s*\/?>(?i)/)
+      .map((x) => x.replace(/^[-•\s]+/, '').trim())
+      .filter((x) => x.length > 0);
+  }
+  return [];
+}
+
+function normalizeInstructions(raw: unknown): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .map((step: any) => {
+        if (typeof step === 'string') return step.trim();
+        if (step && typeof step === 'object') {
+          // HowToStep or list item
+          if (typeof step.text === 'string') return step.text.trim();
+          if (typeof step.name === 'string') return step.name.trim();
+          if (Array.isArray(step.itemListElement)) {
+            return step.itemListElement
+              .map((el: any) => (typeof el === 'string' ? el : el?.text || el?.name || ''))
+              .map((s: string) => (typeof s === 'string' ? s.trim() : ''))
+              .filter((s: string) => s.length > 0)
+              .join(' ');
+          }
+        }
+        return '';
+      })
+      .map((x) => x.replace(/^Step\s*\d+[:.)-]?\s*/i, '').trim())
+      .filter((x) => x.length > 0);
+  }
+  if (typeof raw === 'string') {
+    // Split on common delimiters or HTML breaks
+    return raw
+      .split(/\r?\n+|<br\s*\/?>(?i)|\.(?=\s+[A-Z]|$)/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  return [];
 }
