@@ -126,6 +126,12 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
     }
 
     setIsExtracting(true);
+    // Clear existing ingredients and instructions before extraction
+    setFormData(prev => ({
+      ...prev,
+      ingredients: [],
+      instructions: []
+    }));
     
     try {
       const result = await RecipeExtractorService.extractFromUrl(formData.websiteUrl);
@@ -141,19 +147,19 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
           ingredients: result.ingredients?.length
         });
 
-        // Add extracted instructions
+        // Set extracted instructions (replace existing)
         if (result.instructions && result.instructions.length > 0) {
-          console.log('Adding instructions:', result.instructions);
+          console.log('Setting instructions:', result.instructions);
           setFormData(prev => ({
             ...prev,
-            instructions: [...prev.instructions, ...result.instructions!]
+            instructions: [...result.instructions!]
           }));
           updatedFields.push(`${result.instructions.length} instructions`);
         }
 
-        // Add extracted ingredients (convert from simple strings to structured format)
+        // Set extracted ingredients (replace existing) - map strings to structured items
         if (result.ingredients && result.ingredients.length > 0) {
-          console.log('Adding ingredients:', result.ingredients);
+          console.log('Setting ingredients:', result.ingredients);
           const newIngredients = result.ingredients.map((ingredient: string) => ({
             id: `ingredient-${Date.now()}-${Math.random()}`,
             name: ingredient, // Keep full description as name since AI formatted it properly
@@ -163,7 +169,7 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
           
           setFormData(prev => ({
             ...prev,
-            ingredients: [...prev.ingredients, ...newIngredients]
+            ingredients: newIngredients
           }));
           updatedFields.push(`${result.ingredients.length} ingredients`);
         }
