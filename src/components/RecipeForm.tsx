@@ -269,7 +269,7 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <Label htmlFor="rating">Rating</Label>
                   <Input
