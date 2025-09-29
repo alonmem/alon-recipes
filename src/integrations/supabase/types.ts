@@ -86,6 +86,7 @@ export type Database = {
           cook_time: number | null
           created_at: string | null
           description: string | null
+          calories: number | null
           id: string
           image: string | null
           instructions: string[] | null
@@ -101,6 +102,7 @@ export type Database = {
           cook_time?: number | null
           created_at?: string | null
           description?: string | null
+          calories?: number | null
           id?: string
           image?: string | null
           instructions?: string[] | null
@@ -116,6 +118,7 @@ export type Database = {
           cook_time?: number | null
           created_at?: string | null
           description?: string | null
+          calories?: number | null
           id?: string
           image?: string | null
           instructions?: string[] | null
