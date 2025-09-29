@@ -308,7 +308,7 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
                 />
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <Label htmlFor="rating">Rating</Label>
                   <Input
@@ -338,28 +338,29 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
                     onChange={(e) => setFormData(prev => ({ ...prev, servings: parseInt(e.target.value) || 1 }))}
                   />
                 </div>
-                <div>
-                  <Label htmlFor="calories">Calories</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="calories"
-                      type="number"
-                      min="0"
-                      value={formData.calories ?? 0}
-                      onChange={(e) => setFormData(prev => ({ ...prev, calories: Math.max(0, parseInt(e.target.value) || 0) }))}
-                      className="flex-1"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={calculateCalories}
-                      disabled={isCalculating || formData.ingredients.length === 0}
-                      className="gap-2"
-                    >
-                      <Flame className="w-4 h-4" />
-                      {isCalculating ? "Calculating..." : "Calculate"}
-                    </Button>
-                  </div>
+              </div>
+              
+              <div>
+                <Label htmlFor="calories">Calories</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="calories"
+                    type="number"
+                    min="0"
+                    value={formData.calories ?? 0}
+                    onChange={(e) => setFormData(prev => ({ ...prev, calories: Math.max(0, parseInt(e.target.value) || 0) }))}
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={calculateCalories}
+                    disabled={isCalculating || formData.ingredients.length === 0}
+                    className="gap-2 whitespace-nowrap"
+                  >
+                    <Flame className="w-4 h-4" />
+                    {isCalculating ? "Calculating..." : "Calculate"}
+                  </Button>
                 </div>
               </div>
             </CardContent>
