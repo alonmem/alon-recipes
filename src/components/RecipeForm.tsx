@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Plus, X, ArrowLeft, Save, Trash2, Globe } from "lucide-react";
+import { Plus, X, ArrowLeft, Save, Trash2, Globe, Flame } from "lucide-react";
 import { RecipeExtractorService } from "@/services/recipeExtractor";
 import { useToast } from "@/hooks/use-toast";
 
@@ -31,6 +31,7 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
   const [newIngredient, setNewIngredient] = useState({ name: "", amount: "", unit: "" });
   const [newInstruction, setNewInstruction] = useState("");
   const [isExtracting, setIsExtracting] = useState(false);
+  const [isCalculating, setIsCalculating] = useState(false);
 
   const handleSave = () => {
     const updatedRecipe = {
@@ -113,6 +114,44 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
         i === index ? value : inst
       )
     }));
+  };
+
+  const calculateCalories = async () => {
+    if (formData.ingredients.length === 0) {
+      toast({
+        title: "No ingredients",
+        description: "Please add ingredients before calculating calories",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsCalculating(true);
+    
+    try {
+      const result = await RecipeExtractorService.calculateCalories(formData.ingredients);
+      
+      if (result.success && result.calories) {
+        setFormData(prev => ({
+          ...prev,
+          calories: result.calories
+        }));
+        toast({
+          title: "Calories calculated!",
+          description: `Estimated calories per 100g: ${result.calories}`,
+        });
+      } else {
+        throw new Error(result.error || 'Failed to calculate calories');
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to calculate calories",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCalculating(false);
+    }
   };
 
   const extractFromWebsite = async () => {
@@ -301,13 +340,26 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
                 </div>
                 <div>
                   <Label htmlFor="calories">Calories</Label>
-                  <Input
-                    id="calories"
-                    type="number"
-                    min="0"
-                    value={formData.calories ?? 0}
-                    onChange={(e) => setFormData(prev => ({ ...prev, calories: Math.max(0, parseInt(e.target.value) || 0) }))}
-                  />
+                  <div className="flex gap-2">
+                    <Input
+                      id="calories"
+                      type="number"
+                      min="0"
+                      value={formData.calories ?? 0}
+                      onChange={(e) => setFormData(prev => ({ ...prev, calories: Math.max(0, parseInt(e.target.value) || 0) }))}
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={calculateCalories}
+                      disabled={isCalculating || formData.ingredients.length === 0}
+                      className="gap-2"
+                    >
+                      <Flame className="w-4 h-4" />
+                      {isCalculating ? "Calculating..." : "Calculate"}
+                    </Button>
+                  </div>
                 </div>
               </div>
             </CardContent>
