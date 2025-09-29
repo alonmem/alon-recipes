@@ -6,13 +6,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-interface RecipeExtractionResult {
-  success: boolean;
-  ingredients?: string[];
-  instructions?: string[];
-  error?: string;
-}
-
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -45,7 +38,6 @@ serve(async (req) => {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate',
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache'
       }
@@ -63,7 +55,7 @@ serve(async (req) => {
     if (jsonLdResult) {
       const flat = jsonLdResult.ingredients || [];
       // Try AI refinement for structured ingredients; fallback to heuristic
-      const aiStructured = await refineIngredientsWithAI(flat, Deno.env.get('OPENAI_API_KEY') || '');
+      const aiStructured = await refineIngredientsWithAI(flat, Deno.env.get('OPENAI_API_KEY') || '').catch(() => null);
       const structured = aiStructured && aiStructured.length > 0 ? aiStructured : buildStructuredIngredients(flat);
       const result = {
         success: true,
@@ -89,22 +81,34 @@ serve(async (req) => {
 
     console.log('Sending content to AI for recipe extraction...');
 
-    // Use AI to extract recipe information (try GPT-5 Nano first)
+    // Use AI to extract recipe information with comprehensive fallback
     let aiResponse;
-    try {
-      aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openaiApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-5-nano-2025-08-07',
-          max_completion_tokens: 2000,
-          messages: [
-            {
-              role: 'system',
-              content: `You are a recipe extraction expert. Extract recipe information from website HTML content and return ONLY valid JSON.
+    let aiError = null;
+    
+    // Try models in order of preference (heaviest to lightest)
+    const models = [
+      'gpt-5-nano-2025-08-07',
+      'gpt-4o', 
+      'gpt-4o-mini',
+      'gpt-3.5-turbo'
+    ];
+    
+    for (const model of models) {
+      try {
+        console.log(`Trying AI model: ${model}`);
+        aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openaiApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: model,
+            max_completion_tokens: 2000,
+            messages: [
+              {
+                role: 'system',
+                content: `You are a recipe extraction expert. Extract recipe information from website HTML content and return ONLY valid JSON.
 
 IGNORE: ads, navigation menus, headers, footers, comments, social media widgets, advertisements, unrelated content.
 
@@ -130,74 +134,43 @@ Rules for instructions:
 
 If no clear recipe found, return: {"error": "No recipe found"}
 Return ONLY the JSON, no other text.`
-            },
-            {
-              role: 'user',
-              content: `Extract the recipe from this content:\n\n${textToAnalyze.substring(0, 12000)}`
-            }
-          ]
-        }),
-      });
-    } catch (e) {
-      console.error('Error calling GPT-5 Nano:', e);
+              },
+              {
+                role: 'user',
+                content: `Extract the recipe from this content:\n\n${textToAnalyze.substring(0, 12000)}`
+              }
+            ]
+          })
+        });
+
+        if (aiResponse.ok) {
+          console.log(`Successfully used AI model: ${model}`);
+          break;
+        } else {
+          const errorText = await aiResponse.text();
+          console.error(`${model} API error:`, errorText);
+          aiError = errorText;
+          
+          // If quota exceeded, try next model
+          if (errorText.includes('insufficient_quota') || errorText.includes('quota')) {
+            console.log(`Quota exceeded for ${model}, trying next model...`);
+            continue;
+          }
+          
+          // If other error, try next model
+          console.log(`Error with ${model}, trying next model...`);
+        }
+      } catch (error) {
+        console.error(`Error calling ${model}:`, error);
+        aiError = error.message;
+        continue;
+      }
     }
 
-    // Fallback to GPT-4o if GPT-5 Nano fails
+    // If all AI models failed, use heuristic fallback
     if (!aiResponse || !aiResponse.ok) {
-      console.log('Falling back to GPT-4o...');
-      aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openaiApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'system',
-              content: `You are a recipe extraction expert. Extract recipe information from website HTML content and return ONLY valid JSON.
-
-IGNORE: ads, navigation menus, headers, footers, comments, social media widgets, advertisements, unrelated content.
-
-FOCUS ON: recipe ingredients and cooking instructions only.
-
-Return this EXACT structure:
-{
-  "ingredients": ["ingredient 1", "ingredient 2", "ingredient 3"],
-  "instructions": ["step 1", "step 2", "step 3"]
-}
-
-Rules for ingredients:
-- Extract complete ingredient descriptions including amounts and units
-- Keep original phrasing (e.g., "2 cups flour", "1/2 teaspoon salt")
-- Include preparation notes (e.g., "diced", "chopped", "room temperature")
-
-Rules for instructions:
-- Extract ALL cooking steps in logical order
-- Include preparation steps, cooking steps, and finishing steps  
-- Keep timing and temperature information ("bake for 25 minutes at 350°F")
-- Make each step complete and clear
-- Combine very short related sub-steps if needed
-
-If no clear recipe found, return: {"error": "No recipe found"}
-Return ONLY the JSON, no other text.`
-            },
-            {
-              role: 'user',
-              content: `Extract the recipe from this content:\n\n${textToAnalyze.substring(0, 12000)}`
-            }
-          ],
-          max_tokens: 2000,
-          temperature: 0.1
-        }),
-      });
-    }
-
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error('AI API error:', errorText);
-      throw new Error(`AI API error: ${aiResponse.status}`);
+      console.log('All AI models failed, using heuristic fallback');
+      return await extractRecipeHeuristic(textToAnalyze);
     }
 
     const aiResult = await aiResponse.json();
@@ -239,8 +212,7 @@ Return ONLY the JSON, no other text.`
       structuredIngredients: structured
     };
 
-    console.log('Recipe extraction successful:', result);
-
+    console.log('Returning AI extraction result:', result);
     return new Response(
       JSON.stringify(result),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -261,6 +233,50 @@ Return ONLY the JSON, no other text.`
   }
 });
 
+// Extract recipe data from JSON-LD structured data
+function extractFromJsonLd(html: string): { ingredients: string[]; instructions: string[] } | null {
+  try {
+    const jsonLdRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>(.*?)<\/script>/gs;
+    const matches = html.match(jsonLdRegex);
+    
+    if (!matches) return null;
+    
+    for (const match of matches) {
+      const jsonContent = match.replace(/<script[^>]*type=["']application\/ld\+json["'][^>]*>/, '').replace(/<\/script>/, '');
+      
+      try {
+        const data = JSON.parse(jsonContent);
+        
+        // Handle both single objects and arrays
+        const recipes = Array.isArray(data) ? data : [data];
+        
+        for (const recipe of recipes) {
+          if (recipe['@type'] === 'Recipe' || recipe.type === 'Recipe') {
+            const ingredients = normalizeIngredients(recipe.recipeIngredient || recipe.ingredients || []);
+            const instructions = normalizeInstructions(recipe.recipeInstructions || recipe.instructions || []);
+            
+            if ((ingredients && ingredients.length > 0) || (instructions && instructions.length > 0)) {
+              return {
+                ingredients: ingredients || [],
+                instructions: instructions || []
+              };
+            }
+          }
+        }
+      } catch (e) {
+        console.log('Failed to parse JSON-LD:', e);
+        continue;
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error extracting JSON-LD:', error);
+    return null;
+  }
+}
+
+// Clean HTML content for better AI processing
 function cleanHtmlContent(html: string): string {
   // Remove script and style tags
   let cleaned = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
@@ -269,177 +285,97 @@ function cleanHtmlContent(html: string): string {
   // Remove comments
   cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, '');
   
-  // Preserve list items with a dash prefix to help the AI
-  cleaned = cleaned.replace(/<li[^>]*>/gi, '\n- ');
-  cleaned = cleaned.replace(/<\/(li)[^>]*>/gi, '\n');
-
-  // Preserve block-level boundaries as newlines
-  cleaned = cleaned.replace(/<\/?(h[1-6]|p|div|section|article|main|ul|ol|td|th)[^>]*>/gi, '\n');
-  cleaned = cleaned.replace(/<br[^>]*>/gi, '\n');
+  // Remove navigation and header elements
+  cleaned = cleaned.replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '');
+  cleaned = cleaned.replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '');
+  cleaned = cleaned.replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '');
   
-  // Drop remaining tags
-  cleaned = cleaned.replace(/<[^>]+>/g, ' ');
+  // Remove common non-recipe elements
+  const removePatterns = [
+    /<aside[^>]*>[\s\S]*?<\/aside>/gi,
+    /<div[^>]*class="[^"]*(?:ad|advertisement|banner|sidebar|menu|navigation)[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+    /<div[^>]*id="[^"]*(?:ad|advertisement|banner|sidebar|menu|navigation)[^"]*"[^>]*>[\s\S]*?<\/div>/gi
+  ];
   
-  // Decode HTML entities
+  for (const pattern of removePatterns) {
+    cleaned = cleaned.replace(pattern, '');
+  }
+  
+  // Convert HTML entities
+  cleaned = cleaned.replace(/&nbsp;/g, ' ');
   cleaned = cleaned.replace(/&amp;/g, '&');
   cleaned = cleaned.replace(/&lt;/g, '<');
   cleaned = cleaned.replace(/&gt;/g, '>');
   cleaned = cleaned.replace(/&quot;/g, '"');
   cleaned = cleaned.replace(/&#39;/g, "'");
-  cleaned = cleaned.replace(/&nbsp;/g, ' ');
   
-  // Normalize whitespace but preserve newlines for better parsing
-  cleaned = cleaned.replace(/[\t\f\v\r ]+/g, ' '); // collapse spaces/tabs
-  cleaned = cleaned.replace(/\n{3,}/g, '\n\n'); // keep at most one blank line
-  cleaned = cleaned.replace(/\s*\n\s*/g, '\n'); // trim around newlines
+  // Convert line breaks and clean up whitespace
+  cleaned = cleaned.replace(/<br\s*\/?>/gi, '\n');
+  cleaned = cleaned.replace(/<\/p>/gi, '\n\n');
+  cleaned = cleaned.replace(/<\/div>/gi, '\n');
+  cleaned = cleaned.replace(/<\/li>/gi, '\n');
   
-  return cleaned.trim();
+  // Remove remaining HTML tags
+  cleaned = cleaned.replace(/<[^>]+>/g, '');
+  
+  // Clean up whitespace
+  cleaned = cleaned.replace(/\n\s*\n/g, '\n\n');
+  cleaned = cleaned.replace(/[ \t]+/g, ' ');
+  cleaned = cleaned.trim();
+  
+  return cleaned;
 }
 
-// Attempt to extract ingredients/instructions from JSON-LD structured data
-function extractFromJsonLd(html: string): { ingredients: string[]; instructions: string[] } | null {
-  try {
-    const scriptRegex = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-    const blocks: string[] = [];
-    let match: RegExpExecArray | null;
-    while ((match = scriptRegex.exec(html)) !== null) {
-      const raw = match[1]
-        .replace(/<!\[CDATA\[/g, '')
-        .replace(/\]\]>/g, '')
-        .trim();
-      if (raw) blocks.push(raw);
-    }
-
-    for (const block of blocks) {
-      let json: unknown;
-      try {
-        json = JSON.parse(block);
-      } catch (_e) {
-        // Some sites embed multiple JSON objects concatenated; try to recover basic cases
-        continue;
-      }
-
-      const candidates: any[] = [];
-      if (Array.isArray(json)) {
-        candidates.push(...json);
-      } else if (json && typeof json === 'object') {
-        const obj: any = json;
-        if (obj['@graph'] && Array.isArray(obj['@graph'])) {
-          candidates.push(...obj['@graph']);
-        }
-        candidates.push(obj);
-      }
-
-      for (const node of candidates) {
-        if (!node || typeof node !== 'object') continue;
-        const typeField = node['@type'];
-        const isRecipe = (Array.isArray(typeField) && typeField.includes('Recipe')) || typeField === 'Recipe';
-        const hasRecipeFields = node.recipeIngredient || node.recipeInstructions;
-        if (!isRecipe && !hasRecipeFields) continue;
-
-        const ingredients: string[] = normalizeIngredients(node.recipeIngredient);
-        const instructions: string[] = normalizeInstructions(node.recipeInstructions);
-
-        if ((ingredients && ingredients.length > 0) || (instructions && instructions.length > 0)) {
-          return {
-            ingredients: ingredients || [],
-            instructions: instructions || [],
-          };
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('JSON-LD extraction failed:', e);
-  }
-  return null;
-}
-
-function normalizeIngredients(raw: unknown): string[] {
+// Normalize ingredients array
+function normalizeIngredients(raw: string | string[]): string[] {
   if (!raw) return [];
-  if (Array.isArray(raw)) {
-    return raw
-      .map((x) => (typeof x === 'string' ? x.trim() : ''))
-      .filter((x) => x.length > 0);
-  }
-  if (typeof raw === 'string') {
-    // Some sites provide a single string with line breaks
-    return raw
-      .split(/\r?\n/)
-      .map((x) => x.replace(/^[-•\s]+/, '').trim())
-      .filter((x) => x.length > 0);
-  }
-  return [];
+  
+  const ingredients = Array.isArray(raw) ? raw : [raw];
+  
+  return ingredients
+    .map(ing => typeof ing === 'string' ? ing : ing.name || ing.text || '')
+    .filter(ing => ing && ing.trim().length > 0)
+    .map(ing => ing.trim());
 }
 
-function normalizeInstructions(raw: unknown): string[] {
+// Normalize instructions array
+function normalizeInstructions(raw: string | string[] | any[]): string[] {
   if (!raw) return [];
+  
+  let instructions: string[] = [];
+  
   if (Array.isArray(raw)) {
-    return raw
-      .map((step: any) => {
-        if (typeof step === 'string') return step.trim();
-        if (step && typeof step === 'object') {
-          // HowToStep or list item
-          if (typeof step.text === 'string') return step.text.trim();
-          if (typeof step.name === 'string') return step.name.trim();
-          if (Array.isArray(step.itemListElement)) {
-            return step.itemListElement
-              .map((el: any) => (typeof el === 'string' ? el : el?.text || el?.name || ''))
-              .map((s: string) => (typeof s === 'string' ? s.trim() : ''))
-              .filter((s: string) => s.length > 0)
-              .join(' ');
-          }
-        }
-        return '';
-      })
-      .map((x) => x.replace(/^Step\s*\d+[:.)-]?\s*/i, '').trim())
-      .filter((x) => x.length > 0);
-  }
-  if (typeof raw === 'string') {
-    // Split on common delimiters or HTML breaks
-    return raw
+    instructions = raw.map(step => {
+      if (typeof step === 'string') {
+        return step;
+      } else if (step.text) {
+        return step.text;
+      } else if (step.name) {
+        return step.name;
+      } else if (step.instruction) {
+        return step.instruction;
+      }
+      return '';
+    });
+  } else if (typeof raw === 'string') {
+    // Split by common delimiters
+    instructions = raw
       .split(/\r?\n+|\.(?=\s+[A-Z]|$)/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
   }
-  return [];
+  
+  return instructions.filter(step => step && step.trim().length > 0);
 }
 
-function parseIngredientHeuristic(line: string): { name: string; amount: string; unit: string } {
-  let s = (line || '').trim();
-  s = s.replace(/^[-•\s]+/, '').trim();
-
-  // Prefer mixed numbers and pure fractions before plain integers to avoid capturing only the integer part
-  const amountPattern = /^(?:\d+\s+\d+\/\d+|\d+-\d+\/\d+|\d+\/\d+|\d+\.\d+|\d+|[¼½¾⅓⅔⅛⅜⅝⅞])/;
-  const amountMatch = s.match(amountPattern);
-  let amount = '';
-  if (amountMatch) {
-    amount = amountMatch[0].trim();
-    s = s.slice(amountMatch[0].length).trim();
-  }
-
-  let unit = '';
-  const unitMatch = s.match(new RegExp('^(' + UNIT_REGEX.source + ')(?=\\b)', 'i'));
-  if (unitMatch) {
-    unit = unitMatch[0].trim();
-    s = s.slice(unitMatch[0].length).trim();
-  }
-
-  const name = s.replace(/^of\s+/i, '').trim();
-  return { name, amount, unit };
-}
-
-function buildStructuredIngredients(ingredients: string[]): { name: string; amount: string; unit: string }[] {
-  return ingredients.map(parseIngredientHeuristic);
-}
-
+// AI-powered ingredient structuring with fallback
 async function refineIngredientsWithAI(ingredients: string[], openaiApiKey: string): Promise<{ name: string; amount: string; unit: string }[] | null> {
+  if (!ingredients || ingredients.length === 0) return null;
+
+  const ingredientsList = ingredients.map(ing => `- ${ing}`).join('\n');
+
   try {
-    if (!openaiApiKey) return null;
-    if (!ingredients || ingredients.length === 0) return [];
-
-    const prompt = `You are an expert at parsing cooking ingredients. For each input ingredient string, return a JSON array of objects with exact fields: name, amount, unit. Keep original phrasing in name except quantities/units extracted to amount/unit. Use empty strings for unknown fields. Example input: ["1 1/2 cups all-purpose flour", "2 large eggs"]. Output: [{"name":"all-purpose flour","amount":"1 1/2","unit":"cups"},{"name":"large eggs","amount":"2","unit":""}]\n\nIngredients to parse as JSON array: ${JSON.stringify(ingredients)}`;
-
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    const aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${openaiApiKey}`,
@@ -448,46 +384,98 @@ async function refineIngredientsWithAI(ingredients: string[], openaiApiKey: stri
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         temperature: 0.1,
-        max_tokens: 800,
+        max_tokens: 1000,
+        response_format: { type: "json_object" },
         messages: [
-          { role: 'system', content: 'Return ONLY valid JSON. No code fences. No extra text.' },
-          { role: 'user', content: prompt }
+          {
+            role: 'system',
+            content: `You are an ingredient parsing expert. For each ingredient string, extract the amount, unit, and name. Return ONLY valid JSON in the format: {"structured_ingredients": [{"name": "...", "amount": "...", "unit": "..."}, ...]}. If a field is not present, use an empty string. Combine descriptive parts into the name.`
+          },
+          {
+            role: 'user',
+            content: `Structure these ingredients:\n${ingredientsList}`
+          }
         ]
-      })
+      }),
     });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    const content = (data.choices?.[0]?.message?.content || '').trim();
-    if (!content) return null;
-    const jsonText = content.replace(/^```json\n?/i, '').replace(/```\s*$/i, '');
-    const parsed = JSON.parse(jsonText);
-    if (!Array.isArray(parsed)) return null;
-    return parsed.map((x: any) => ({
-      name: typeof x?.name === 'string' ? x.name.trim() : '',
-      amount: typeof x?.amount === 'string' ? x.amount.trim() : '',
-      unit: typeof x?.unit === 'string' ? x.unit.trim() : ''
-    }));
-  } catch (_e) {
-    return null;
+
+    if (aiResponse.ok) {
+      const aiResult = await aiResponse.json();
+      const structured = JSON.parse(aiResult.choices[0].message.content).structured_ingredients;
+      if (Array.isArray(structured)) {
+        return structured.map(s => ({
+          name: s.name || '',
+          amount: s.amount || '',
+          unit: s.unit || ''
+        }));
+      }
+    }
+  } catch (e) {
+    console.warn('AI ingredient structuring failed, falling back to heuristic:', e);
   }
+
+  return null;
 }
 
-const UNIT_REGEX = new RegExp(
-  String([
-    'teaspoon', 'teaspoons', 'tsp', 'tsp.',
-    'tablespoon', 'tablespoons', 'tbsp', 'tbsp.',
-    'cup', 'cups',
-    'ounce', 'ounces', 'oz', 'oz.',
-    'pound', 'pounds', 'lb', 'lb.', 'lbs', 'lbs.',
-    'gram', 'grams', 'g', 'g.',
-    'kilogram', 'kilograms', 'kg', 'kg.',
-    'milliliter', 'milliliters', 'ml', 'ml.',
-    'liter', 'liters', 'l', 'l.',
-    'pinch', 'pinches', 'dash', 'dashes',
-    'clove', 'cloves', 'slice', 'slices', 'package', 'packages', 'can', 'cans',
-  ].join('|')),
-  'i'
-);
+// Heuristic ingredient structuring (fallback)
+function buildStructuredIngredients(ingredients: string[]): { name: string; amount: string; unit: string }[] {
+  if (!ingredients || ingredients.length === 0) return [];
+
+  return ingredients.map(parseIngredientHeuristic);
+}
+
+// Parse individual ingredient using heuristic rules
+function parseIngredientHeuristic(ingredient: string): { name: string; amount: string; unit: string } {
+  if (!ingredient || typeof ingredient !== 'string') {
+    return { name: '', amount: '', unit: '' };
+  }
+
+  const trimmed = ingredient.trim();
+  if (trimmed.length === 0) {
+    return { name: '', amount: '', unit: '' };
+  }
+
+  // Pattern to match amounts (including fractions, decimals, mixed numbers)
+  const amountPattern = /^(\d+\s*\d+\/\d+|\d+\/\d+|\d+\.\d+|\d+|[¼½¾⅓⅔⅛⅜⅝⅞])/;
+  const amountMatch = trimmed.match(amountPattern);
+
+  if (!amountMatch) {
+    // No amount found, treat entire string as name
+    return { name: trimmed, amount: '', unit: '' };
+  }
+
+  const amount = amountMatch[1].trim();
+  const remaining = trimmed.substring(amountMatch[0].length).trim();
+
+  // Pattern to match units
+  const unitPattern = new RegExp(
+    `^(${[
+      'cup', 'cups', 'c', 'c.',
+      'tablespoon', 'tablespoons', 'tbsp', 'tbsp.', 'tbs', 'tbs.',
+      'teaspoon', 'teaspoons', 'tsp', 'tsp.', 't', 't.',
+      'ounce', 'ounces', 'oz', 'oz.',
+      'pound', 'pounds', 'lb', 'lb.', 'lbs', 'lbs.',
+      'gram', 'grams', 'g', 'g.',
+      'kilogram', 'kilograms', 'kg', 'kg.',
+      'milliliter', 'milliliters', 'ml', 'ml.',
+      'liter', 'liters', 'l', 'l.',
+      'pinch', 'pinches', 'dash', 'dashes',
+      'clove', 'cloves', 'slice', 'slices', 'package', 'packages', 'can', 'cans',
+    ].join('|')})`,
+    'i'
+  );
+
+  const unitMatch = remaining.match(unitPattern);
+
+  if (unitMatch) {
+    const unit = unitMatch[1];
+    const name = remaining.substring(unitMatch[0].length).trim();
+    return { name, amount, unit };
+  } else {
+    // No unit found, treat remaining as name
+    return { name: remaining, amount, unit: '' };
+  }
+}
 
 // Check if URL is a YouTube video
 function isYouTubeUrl(url: string): boolean {
@@ -599,5 +587,106 @@ async function extractDescriptionAlternative(videoId: string): Promise<string | 
   } catch (error) {
     console.error('Error in alternative YouTube extraction:', error);
     return null;
+  }
+}
+
+// Heuristic fallback for recipe extraction when AI fails
+async function extractRecipeHeuristic(content: string): Promise<Response> {
+  console.log('Using heuristic recipe extraction fallback');
+  
+  try {
+    // Simple heuristic extraction
+    const lines = content.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    
+    const ingredients: string[] = [];
+    const instructions: string[] = [];
+    
+    let inIngredients = false;
+    let inInstructions = false;
+    
+    for (const line of lines) {
+      const lowerLine = line.toLowerCase();
+      
+      // Detect ingredients section
+      if (lowerLine.includes('ingredients') || lowerLine.includes('ingredient')) {
+        inIngredients = true;
+        inInstructions = false;
+        continue;
+      }
+      
+      // Detect instructions section
+      if (lowerLine.includes('instructions') || lowerLine.includes('directions') || 
+          lowerLine.includes('method') || lowerLine.includes('steps')) {
+        inInstructions = true;
+        inIngredients = false;
+        continue;
+      }
+      
+      // Skip headers and empty lines
+      if (line.length < 3 || lowerLine.includes('recipe') || lowerLine.includes('serves')) {
+        continue;
+      }
+      
+      // Add to ingredients if in ingredients section
+      if (inIngredients && !inInstructions) {
+        // Look for common ingredient patterns
+        if (line.match(/\d+/) || lowerLine.includes('cup') || lowerLine.includes('tbsp') || 
+            lowerLine.includes('tsp') || lowerLine.includes('ounce') || lowerLine.includes('pound')) {
+          ingredients.push(line);
+        }
+      }
+      
+      // Add to instructions if in instructions section
+      if (inInstructions && !inIngredients) {
+        // Look for step patterns
+        if (line.match(/^\d+\./) || line.match(/^step/i) || line.match(/^[a-z]\)/i)) {
+          instructions.push(line);
+        }
+      }
+    }
+    
+    // If no structured sections found, try to extract from any lines
+    if (ingredients.length === 0 && instructions.length === 0) {
+      for (const line of lines) {
+        // Look for ingredient-like patterns
+        if (line.match(/\d+\s*(cup|tbsp|tsp|ounce|pound|gram|kg|ml|l|pinch|dash)/i)) {
+          ingredients.push(line);
+        }
+        // Look for instruction-like patterns
+        else if (line.match(/(mix|add|heat|bake|cook|stir|chop|dice|slice|boil|fry|roast)/i)) {
+          instructions.push(line);
+        }
+      }
+    }
+    
+    // Build structured ingredients using heuristic
+    const structuredIngredients = buildStructuredIngredients(ingredients);
+    
+    const result = {
+      success: true,
+      ingredients: ingredients,
+      instructions: instructions,
+      structuredIngredients: structuredIngredients
+    };
+    
+    console.log('Heuristic extraction result:', result);
+    
+    return new Response(
+      JSON.stringify(result),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+    
+  } catch (error) {
+    console.error('Heuristic extraction failed:', error);
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: 'Failed to extract recipe using heuristic method'
+      }),
+      { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 500
+      }
+    );
   }
 }
