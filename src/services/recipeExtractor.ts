@@ -1,4 +1,6 @@
 import OpenAI from "openai";
+import { supabase } from '@/integrations/supabase/client';
+
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
