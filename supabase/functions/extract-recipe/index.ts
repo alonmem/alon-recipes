@@ -28,6 +28,17 @@ serve(async (req) => {
 
     console.log('Extracting recipe from URL:', url);
 
+    // Check if it's a YouTube URL and extract video description
+    let contentToExtract = '';
+    if (isYouTubeUrl(url)) {
+      console.log('YouTube URL detected, extracting video description...');
+      const videoDescription = await extractYouTubeDescription(url);
+      if (videoDescription) {
+        contentToExtract = videoDescription;
+        console.log('YouTube description extracted, length:', contentToExtract.length);
+      }
+    }
+
     // Fetch website content
     const websiteResponse = await fetch(url, {
       headers: {
@@ -67,8 +78,8 @@ serve(async (req) => {
       );
     }
 
-    // Clean HTML and extract meaningful text for AI analysis (fallback)
-    const cleanedText = cleanHtmlContent(htmlContent);
+    // Use YouTube description if available, otherwise clean HTML
+    const textToAnalyze = contentToExtract || cleanHtmlContent(htmlContent);
     
     // Get OpenAI API key
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
@@ -122,7 +133,7 @@ Return ONLY the JSON, no other text.`
             },
             {
               role: 'user',
-              content: `Extract the recipe from this website content:\n\n${cleanedText.substring(0, 12000)}`
+              content: `Extract the recipe from this content:\n\n${textToAnalyze.substring(0, 12000)}`
             }
           ]
         }),
@@ -174,7 +185,7 @@ Return ONLY the JSON, no other text.`
             },
             {
               role: 'user',
-              content: `Extract the recipe from this website content:\n\n${cleanedText.substring(0, 12000)}`
+              content: `Extract the recipe from this content:\n\n${textToAnalyze.substring(0, 12000)}`
             }
           ],
           max_tokens: 2000,
@@ -477,3 +488,116 @@ const UNIT_REGEX = new RegExp(
   ].join('|')),
   'i'
 );
+
+// Check if URL is a YouTube video
+function isYouTubeUrl(url: string): boolean {
+  const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)/;
+  return youtubeRegex.test(url);
+}
+
+// Extract video ID from YouTube URL
+function extractVideoId(url: string): string | null {
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/,
+    /youtube\.com\/watch\?.*v=([^&\n?#]+)/
+  ];
+  
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+// Extract video description from YouTube using oEmbed API
+async function extractYouTubeDescription(url: string): Promise<string | null> {
+  try {
+    const videoId = extractVideoId(url);
+    if (!videoId) {
+      console.log('Could not extract video ID from URL:', url);
+      return null;
+    }
+
+    console.log('Extracting description for video ID:', videoId);
+
+    // Use YouTube oEmbed API to get video info
+    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+    
+    const response = await fetch(oembedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; RecipeExtractor/1.0)'
+      }
+    });
+
+    if (!response.ok) {
+      console.log('oEmbed API failed, trying alternative method');
+      return await extractDescriptionAlternative(videoId);
+    }
+
+    const data = await response.json();
+    const description = data.description || '';
+    
+    if (description.length < 50) {
+      console.log('oEmbed description too short, trying alternative method');
+      return await extractDescriptionAlternative(videoId);
+    }
+
+    console.log('YouTube description extracted via oEmbed, length:', description.length);
+    return description;
+
+  } catch (error) {
+    console.error('Error extracting YouTube description:', error);
+    return null;
+  }
+}
+
+// Alternative method: try to extract from YouTube page
+async function extractDescriptionAlternative(videoId: string): Promise<string | null> {
+  try {
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    
+    const response = await fetch(videoUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+      }
+    });
+
+    if (!response.ok) {
+      console.log('Failed to fetch YouTube page');
+      return null;
+    }
+
+    const html = await response.text();
+    
+    // Try to extract description from meta tags or structured data
+    const descriptionMatch = html.match(/<meta name="description" content="([^"]+)"/);
+    if (descriptionMatch) {
+      const description = descriptionMatch[1];
+      console.log('YouTube description extracted from meta tag, length:', description.length);
+      return description;
+    }
+
+    // Try to find description in JSON-LD
+    const jsonLdMatch = html.match(/<script type="application\/ld\+json">([^<]+)<\/script>/);
+    if (jsonLdMatch) {
+      try {
+        const jsonData = JSON.parse(jsonLdMatch[1]);
+        if (jsonData.description) {
+          console.log('YouTube description extracted from JSON-LD, length:', jsonData.description.length);
+          return jsonData.description;
+        }
+      } catch (e) {
+        console.log('Failed to parse JSON-LD');
+      }
+    }
+
+    console.log('Could not extract YouTube description');
+    return null;
+
+  } catch (error) {
+    console.error('Error in alternative YouTube extraction:', error);
+    return null;
+  }
+}
