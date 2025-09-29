@@ -50,11 +50,15 @@ serve(async (req) => {
     // Try structured data (JSON-LD) first for exact ingredients/instructions
     const jsonLdResult = extractFromJsonLd(htmlContent);
     if (jsonLdResult) {
+      const flat = jsonLdResult.ingredients || [];
+      // Try AI refinement for structured ingredients; fallback to heuristic
+      const aiStructured = await refineIngredientsWithAI(flat, Deno.env.get('OPENAI_API_KEY') || '');
+      const structured = aiStructured && aiStructured.length > 0 ? aiStructured : buildStructuredIngredients(flat);
       const result = {
         success: true,
-        ingredients: jsonLdResult.ingredients,
+        ingredients: flat,
         instructions: jsonLdResult.instructions,
-        structuredIngredients: buildStructuredIngredients(jsonLdResult.ingredients)
+        structuredIngredients: structured
       };
       console.log('Returning result from JSON-LD structured data:', result);
       return new Response(
@@ -214,11 +218,14 @@ Return ONLY the JSON, no other text.`
 
     // Return simplified structure matching the new format
     const flatIngredients: string[] = recipeData.ingredients || [];
+    // Try AI refinement; fallback to heuristic if it fails
+    const aiStructured = await refineIngredientsWithAI(flatIngredients, openaiApiKey).catch(() => null);
+    const structured = aiStructured && aiStructured.length > 0 ? aiStructured : buildStructuredIngredients(flatIngredients);
     const result = {
       success: true,
       ingredients: flatIngredients,
       instructions: recipeData.instructions || [],
-      structuredIngredients: buildStructuredIngredients(flatIngredients)
+      structuredIngredients: structured
     };
 
     console.log('Recipe extraction successful:', result);
@@ -411,6 +418,46 @@ function parseIngredientHeuristic(line: string): { name: string; amount: string;
 
 function buildStructuredIngredients(ingredients: string[]): { name: string; amount: string; unit: string }[] {
   return ingredients.map(parseIngredientHeuristic);
+}
+
+async function refineIngredientsWithAI(ingredients: string[], openaiApiKey: string): Promise<{ name: string; amount: string; unit: string }[] | null> {
+  try {
+    if (!openaiApiKey) return null;
+    if (!ingredients || ingredients.length === 0) return [];
+
+    const prompt = `You are an expert at parsing cooking ingredients. For each input ingredient string, return a JSON array of objects with exact fields: name, amount, unit. Keep original phrasing in name except quantities/units extracted to amount/unit. Use empty strings for unknown fields. Example input: ["1 1/2 cups all-purpose flour", "2 large eggs"]. Output: [{"name":"all-purpose flour","amount":"1 1/2","unit":"cups"},{"name":"large eggs","amount":"2","unit":""}]\n\nIngredients to parse as JSON array: ${JSON.stringify(ingredients)}`;
+
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0.1,
+        max_tokens: 800,
+        messages: [
+          { role: 'system', content: 'Return ONLY valid JSON. No code fences. No extra text.' },
+          { role: 'user', content: prompt }
+        ]
+      })
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const content = (data.choices?.[0]?.message?.content || '').trim();
+    if (!content) return null;
+    const jsonText = content.replace(/^```json\n?/i, '').replace(/```\s*$/i, '');
+    const parsed = JSON.parse(jsonText);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.map((x: any) => ({
+      name: typeof x?.name === 'string' ? x.name.trim() : '',
+      amount: typeof x?.amount === 'string' ? x.amount.trim() : '',
+      unit: typeof x?.unit === 'string' ? x.unit.trim() : ''
+    }));
+  } catch (_e) {
+    return null;
+  }
 }
 
 const UNIT_REGEX = new RegExp(
