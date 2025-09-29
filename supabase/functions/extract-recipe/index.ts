@@ -343,7 +343,7 @@ function normalizeIngredients(raw: unknown): string[] {
   if (typeof raw === 'string') {
     // Some sites provide a single string with line breaks
     return raw
-      .split(/\r?\n|<br\s*\/?>(?i)/)
+      .split(/\r?\n/)
       .map((x) => x.replace(/^[-•\s]+/, '').trim())
       .filter((x) => x.length > 0);
   }
@@ -376,7 +376,7 @@ function normalizeInstructions(raw: unknown): string[] {
   if (typeof raw === 'string') {
     // Split on common delimiters or HTML breaks
     return raw
-      .split(/\r?\n+|<br\s*\/?>(?i)|\.(?=\s+[A-Z]|$)/)
+      .split(/\r?\n+|\.(?=\s+[A-Z]|$)/)
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
   }

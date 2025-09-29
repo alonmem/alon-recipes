@@ -189,12 +189,17 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
           });
         }
       } else {
-        throw new Error(result.error || 'Failed to extract recipe');
+        toast({
+          title: "Extraction failed",
+          description: result.error || 'Failed to extract recipe',
+          variant: "destructive",
+        });
+        return;
       }
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to extract recipe information",
+        description: error instanceof Error ? error.message : "Failed to extract recipe information",
         variant: "destructive",
       });
     } finally {
