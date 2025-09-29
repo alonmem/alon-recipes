@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { Star, Clock, Users, ExternalLink, Youtube, ArrowLeft, Edit, MessageSquare, Plus } from "lucide-react";
+import { Star, Clock, Users, ExternalLink, Youtube, ArrowLeft, Edit, MessageSquare, Plus, Flame } from "lucide-react";
 import { useState } from "react";
 
 interface RecipeDetailProps {
@@ -61,7 +61,7 @@ export const RecipeDetail = ({ recipe, onBack, onEdit, onAddComment }: RecipeDet
           {/* Quick Stats */}
           <Card>
             <CardContent className="p-6">
-              <div className="grid grid-cols-3 gap-4 text-center">
+              <div className="grid grid-cols-3 md:grid-cols-4 gap-4 text-center">
                 <div>
                   <div className="flex items-center justify-center gap-1 mb-1">
                     <Star className="w-4 h-4 fill-recipe-gold text-recipe-gold" />
@@ -83,6 +83,15 @@ export const RecipeDetail = ({ recipe, onBack, onEdit, onAddComment }: RecipeDet
                   </div>
                   <div className="text-sm text-muted-foreground">Servings</div>
                 </div>
+                {typeof recipe.calories === 'number' && (
+                  <div>
+                    <div className="flex items-center justify-center gap-1 mb-1">
+                      <Flame className="w-4 h-4" />
+                      <span className="font-semibold">{recipe.calories} kcal</span>
+                    </div>
+                    <div className="text-sm text-muted-foreground">Calories</div>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

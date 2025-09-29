@@ -98,6 +98,7 @@ const Index = () => {
       instructions: [],
       cookTime: 0,
       servings: 1,
+        calories: 0,
       comments: [],
       createdAt: new Date(),
       updatedAt: new Date()

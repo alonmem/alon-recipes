@@ -9,6 +9,7 @@ export interface Recipe {
   instructions: string[];
   cookTime: number;
   servings: number;
+  calories?: number;
   youtubeUrl?: string;
   websiteUrl?: string;
   comments: Comment[];

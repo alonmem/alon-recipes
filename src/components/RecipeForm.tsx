@@ -299,6 +299,16 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
                     onChange={(e) => setFormData(prev => ({ ...prev, servings: parseInt(e.target.value) || 1 }))}
                   />
                 </div>
+                <div>
+                  <Label htmlFor="calories">Calories</Label>
+                  <Input
+                    id="calories"
+                    type="number"
+                    min="0"
+                    value={formData.calories ?? 0}
+                    onChange={(e) => setFormData(prev => ({ ...prev, calories: Math.max(0, parseInt(e.target.value) || 0) }))}
+                  />
+                </div>
               </div>
             </CardContent>
           </Card>

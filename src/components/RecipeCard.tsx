@@ -2,7 +2,7 @@ import { Recipe } from "@/types/recipe";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Star, Clock, Users, ExternalLink, Youtube } from "lucide-react";
+import { Star, Clock, Users, ExternalLink, Youtube, Flame } from "lucide-react";
 
 interface RecipeCardProps {
   recipe: Recipe;
@@ -50,6 +50,12 @@ export const RecipeCard = ({ recipe, onView }: RecipeCardProps) => {
               <Users className="w-4 h-4" />
               <span>{recipe.servings}</span>
             </div>
+            {typeof recipe.calories === 'number' && (
+              <div className="flex items-center gap-1">
+                <Flame className="w-4 h-4" />
+                <span>{recipe.calories} kcal</span>
+              </div>
+            )}
           </div>
           
           <div className="flex flex-wrap gap-1">
