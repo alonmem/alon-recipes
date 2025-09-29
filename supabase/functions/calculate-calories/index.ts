@@ -18,8 +18,11 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  let ingredients: { name: string; amount: string; unit: string }[] = [];
+  
   try {
-    const { ingredients } = await req.json();
+    const requestBody = await req.json();
+    ingredients = requestBody.ingredients;
     
     if (!ingredients || !Array.isArray(ingredients) || ingredients.length === 0) {
       throw new Error('Ingredients array is required');
