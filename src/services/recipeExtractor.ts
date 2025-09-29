@@ -1,9 +1,12 @@
 import { supabase } from '@/integrations/supabase/client';
 
+interface StructuredIngredient { name: string; amount: string; unit: string }
+
 interface RecipeExtractionResult {
   success: boolean;
   instructions?: string[];
   ingredients?: string[];
+  structuredIngredients?: StructuredIngredient[];
   error?: string;
 }
 
@@ -31,7 +34,8 @@ export class RecipeExtractorService {
       return {
         success: true,
         instructions: data.instructions || [],
-        ingredients: data.ingredients || []
+        ingredients: data.ingredients || [],
+        structuredIngredients: data.structuredIngredients || []
       };
     } catch (error) {
       console.error('Error extracting recipe from URL:', error);

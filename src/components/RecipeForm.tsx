@@ -157,21 +157,27 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
           updatedFields.push(`${result.instructions.length} instructions`);
         }
 
-        // Set extracted ingredients (replace existing) - map strings to structured items
-        if (result.ingredients && result.ingredients.length > 0) {
-          console.log('Setting ingredients:', result.ingredients);
-          const newIngredients = result.ingredients.map((ingredient: string) => ({
+        // Set extracted ingredients (replace existing) - prefer structuredIngredients when available
+        if ((result.structuredIngredients && result.structuredIngredients.length > 0) || (result.ingredients && result.ingredients.length > 0)) {
+          const structured = (result.structuredIngredients || []).map((ing) => ({
             id: `ingredient-${Date.now()}-${Math.random()}`,
-            name: ingredient, // Keep full description as name since AI formatted it properly
-            amount: '', // Amount is included in the name string
-            unit: ''   // Unit is included in the name string
+            name: ing.name,
+            amount: ing.amount,
+            unit: ing.unit
           }));
-          
+          const fallback = (result.ingredients || []).map((ingredient: string) => ({
+            id: `ingredient-${Date.now()}-${Math.random()}`,
+            name: ingredient,
+            amount: '',
+            unit: ''
+          }));
+          const newIngredients = structured.length > 0 ? structured : fallback;
+
           setFormData(prev => ({
             ...prev,
             ingredients: newIngredients
           }));
-          updatedFields.push(`${result.ingredients.length} ingredients`);
+          updatedFields.push(`${newIngredients.length} ingredients`);
         }
 
         console.log('Updated fields:', updatedFields);

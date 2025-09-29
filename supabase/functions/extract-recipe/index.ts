@@ -54,6 +54,7 @@ serve(async (req) => {
         success: true,
         ingredients: jsonLdResult.ingredients,
         instructions: jsonLdResult.instructions,
+        structuredIngredients: buildStructuredIngredients(jsonLdResult.ingredients)
       };
       console.log('Returning result from JSON-LD structured data:', result);
       return new Response(
@@ -212,10 +213,12 @@ Return ONLY the JSON, no other text.`
     }
 
     // Return simplified structure matching the new format
+    const flatIngredients: string[] = recipeData.ingredients || [];
     const result = {
       success: true,
-      ingredients: recipeData.ingredients || [],
-      instructions: recipeData.instructions || []
+      ingredients: flatIngredients,
+      instructions: recipeData.instructions || [],
+      structuredIngredients: buildStructuredIngredients(flatIngredients)
     };
 
     console.log('Recipe extraction successful:', result);
@@ -382,3 +385,47 @@ function normalizeInstructions(raw: unknown): string[] {
   }
   return [];
 }
+
+function parseIngredientHeuristic(line: string): { name: string; amount: string; unit: string } {
+  let s = (line || '').trim();
+  s = s.replace(/^[-•\s]+/, '').trim();
+
+  const amountPattern = /^(\d+(?:[\s-]?\d+\/\d+)?|\d+\/\d+|\d+\.\d+|[¼½¾⅓⅔⅛⅜⅝⅞])/;
+  const amountMatch = s.match(amountPattern);
+  let amount = '';
+  if (amountMatch) {
+    amount = amountMatch[0].trim();
+    s = s.slice(amountMatch[0].length).trim();
+  }
+
+  let unit = '';
+  const unitMatch = s.match(new RegExp('^(' + UNIT_REGEX.source + ')(?=\\b)', 'i'));
+  if (unitMatch) {
+    unit = unitMatch[0].trim();
+    s = s.slice(unitMatch[0].length).trim();
+  }
+
+  const name = s.replace(/^of\s+/i, '').trim();
+  return { name, amount, unit };
+}
+
+function buildStructuredIngredients(ingredients: string[]): { name: string; amount: string; unit: string }[] {
+  return ingredients.map(parseIngredientHeuristic);
+}
+
+const UNIT_REGEX = new RegExp(
+  String([
+    'teaspoon', 'teaspoons', 'tsp', 'tsp.',
+    'tablespoon', 'tablespoons', 'tbsp', 'tbsp.',
+    'cup', 'cups',
+    'ounce', 'ounces', 'oz', 'oz.',
+    'pound', 'pounds', 'lb', 'lb.', 'lbs', 'lbs.',
+    'gram', 'grams', 'g', 'g.',
+    'kilogram', 'kilograms', 'kg', 'kg.',
+    'milliliter', 'milliliters', 'ml', 'ml.',
+    'liter', 'liters', 'l', 'l.',
+    'pinch', 'pinches', 'dash', 'dashes',
+    'clove', 'cloves', 'slice', 'slices', 'package', 'packages', 'can', 'cans',
+  ].join('|')),
+  'i'
+);
