@@ -397,7 +397,8 @@ function parseIngredientHeuristic(line: string): { name: string; amount: string;
   let s = (line || '').trim();
   s = s.replace(/^[-•\s]+/, '').trim();
 
-  const amountPattern = /^(\d+(?:[\s-]?\d+\/\d+)?|\d+\/\d+|\d+\.\d+|[¼½¾⅓⅔⅛⅜⅝⅞])/;
+  // Prefer mixed numbers and pure fractions before plain integers to avoid capturing only the integer part
+  const amountPattern = /^(?:\d+\s+\d+\/\d+|\d+-\d+\/\d+|\d+\/\d+|\d+\.\d+|\d+|[¼½¾⅓⅔⅛⅜⅝⅞])/;
   const amountMatch = s.match(amountPattern);
   let amount = '';
   if (amountMatch) {
