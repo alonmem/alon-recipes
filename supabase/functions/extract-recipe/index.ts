@@ -333,7 +333,7 @@ function normalizeIngredients(raw: string | string[]): string[] {
   const ingredients = Array.isArray(raw) ? raw : [raw];
   
   return ingredients
-    .map(ing => typeof ing === 'string' ? ing : ing.name || ing.text || '')
+    .map(ing => typeof ing === 'string' ? ing : (ing as any).name || (ing as any).text || '')
     .filter(ing => ing && ing.trim().length > 0)
     .map(ing => ing.trim());
 }
@@ -523,17 +523,23 @@ async function extractYouTubeDescription(url: string): Promise<string | null> {
     }
 
     const data = await response.json();
-    const description = data.description || '';
+    let description = data.description || '';
+    
+    // For YouTube Shorts, if no description, try using the title
+    if (!description && data.title) {
+      console.log('No description found, using title as fallback:', data.title);
+      description = data.title;
+    }
     
     // For YouTube Shorts, descriptions are often very short, so lower the threshold
-    const minLength = url.includes('/shorts/') ? 10 : 50;
+    const minLength = url.includes('/shorts/') ? 5 : 50;
     
     if (description.length < minLength) {
-      console.log('oEmbed description too short, trying alternative method');
+      console.log('oEmbed description/title too short, trying alternative method');
       return await extractDescriptionAlternative(videoId);
     }
 
-    console.log('YouTube description extracted via oEmbed, length:', description.length);
+    console.log('YouTube description/title extracted via oEmbed, length:', description.length);
     return description;
 
   } catch (error) {
@@ -574,9 +580,19 @@ async function extractDescriptionAlternative(videoId: string): Promise<string | 
     const titleMatch = html.match(/<title>([^<]+)</);
     if (titleMatch) {
       const title = titleMatch[1].replace(' - YouTube', '').trim();
-      if (title.length > 10) {
+      if (title.length > 5) { // Lower threshold for YouTube Shorts
         console.log('YouTube title extracted as fallback, length:', title.length);
         return title;
+      }
+    }
+
+    // For YouTube Shorts, try to extract from video description in the page
+    const videoDescriptionMatch = html.match(/"description":"([^"]+)"/);
+    if (videoDescriptionMatch) {
+      const videoDescription = videoDescriptionMatch[1].replace(/\\n/g, ' ').trim();
+      if (videoDescription.length > 10) {
+        console.log('YouTube video description extracted from page, length:', videoDescription.length);
+        return videoDescription;
       }
     }
 
@@ -672,10 +688,26 @@ async function extractRecipeHeuristic(content: string): Promise<Response> {
         // For very short content (like YouTube Shorts), be more aggressive
         else if (line.length > 5 && line.length < 200) {
           // If it looks like a cooking instruction, add it
-          if (line.match(/(ingredient|recipe|cooking|food|dish|meal)/i)) {
+          if (line.match(/(ingredient|recipe|cooking|food|dish|meal|soup|carrot|ginger)/i)) {
             instructions.push(line);
           }
         }
+      }
+    }
+    
+    // Special handling for YouTube Shorts - if we have a title but no other content,
+    // try to extract recipe information from the title itself
+    if (ingredients.length === 0 && instructions.length === 0 && content.length < 500) {
+      console.log('Very short content detected, trying to extract from title/description');
+      
+      // Look for recipe-related keywords in the content
+      const recipeKeywords = /(soup|stew|curry|pasta|salad|bread|cake|cookie|pie|pizza|burger|sandwich|rice|noodle|sauce|dressing|marinade|seasoning|spice|herb|vegetable|meat|chicken|beef|fish|seafood|dairy|cheese|milk|cream|butter|oil|flour|sugar|salt|pepper|garlic|onion|tomato|carrot|ginger|potato|broccoli|spinach|lettuce|basil|oregano|thyme|rosemary|parsley|cilantro)/gi;
+      const matches = content.match(recipeKeywords);
+      
+      if (matches && matches.length > 0) {
+        // If we found recipe keywords, treat the entire content as a recipe instruction
+        instructions.push(content);
+        console.log('Added content as recipe instruction based on keywords');
       }
     }
     
