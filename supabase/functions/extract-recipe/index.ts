@@ -108,11 +108,11 @@ serve(async (req) => {
           messages: [
             {
               role: 'system',
-              content: `You are a recipe extraction expert. Extract recipe information from website HTML content and return ONLY valid JSON.
+              content: `You are a recipe extraction expert specializing in YouTube cooking videos. Extract recipe information from video descriptions, titles, and any text content and return ONLY valid JSON.
 
-IGNORE: ads, navigation menus, headers, footers, comments, social media widgets, advertisements, unrelated content.
+IGNORE: ads, navigation menus, headers, footers, comments, social media widgets, advertisements, unrelated content, timestamps, hashtags.
 
-FOCUS ON: recipe ingredients and cooking instructions only.
+FOCUS ON: recipe ingredients and detailed cooking instructions from video content.
 
 Return this EXACT structure:
 {
@@ -124,13 +124,23 @@ Rules for ingredients:
 - Extract complete ingredient descriptions including amounts and units
 - Keep original phrasing (e.g., "2 cups flour", "1/2 teaspoon salt")
 - Include preparation notes (e.g., "diced", "chopped", "room temperature")
+- Look for ingredients mentioned in video descriptions or comments
 
 Rules for instructions:
-- Extract ALL cooking steps in logical order
-- Include preparation steps, cooking steps, and finishing steps  
+- Extract ALL cooking steps in logical order from video descriptions
+- Include preparation steps, cooking steps, and finishing steps
 - Keep timing and temperature information ("bake for 25 minutes at 350°F")
 - Make each step complete and clear
-- Combine very short related sub-steps if needed
+- For YouTube Shorts, extract steps from the description or infer from the title
+- Look for numbered steps, bullet points, or paragraph breaks
+- Include cooking techniques mentioned (sauté, simmer, roast, etc.)
+- Extract any special tips or techniques mentioned
+
+Special YouTube handling:
+- If content is very short (like a title), try to infer basic cooking steps
+- Look for cooking verbs: chop, dice, slice, mix, stir, heat, cook, bake, fry, etc.
+- Extract any timing information mentioned
+- For recipe titles, try to break down into logical cooking steps
 
 If no clear recipe found, return: {"error": "No recipe found"}
 Return ONLY the JSON, no other text.`
@@ -479,8 +489,8 @@ function parseIngredientHeuristic(ingredient: string): { name: string; amount: s
     if (unitMatch) {
       // Special check for single letter units - make sure they're not part of descriptive words
       if (unit.length === 1 || unit.length === 2) {
-        const beforeUnit = remaining.substring(0, unitMatch.index).trim();
-        const afterUnit = remaining.substring(unitMatch.index + unit.length).trim();
+        const beforeUnit = remaining.substring(0, unitMatch.index || 0).trim();
+        const afterUnit = remaining.substring((unitMatch.index || 0) + unit.length).trim();
         
         // If there's text before the unit, it might be a descriptive word
         if (beforeUnit.length > 0) {
@@ -496,7 +506,7 @@ function parseIngredientHeuristic(ingredient: string): { name: string; amount: s
       }
       
       const unitText = unitMatch[0];
-      const name = remaining.substring(unitMatch.index + unitText.length).trim();
+      const name = remaining.substring((unitMatch.index || 0) + unitText.length).trim();
       return { name, amount, unit: unitText };
     }
   }
@@ -672,6 +682,102 @@ async function extractDescriptionAlternative(videoId: string): Promise<string | 
   }
 }
 
+// Enhanced instruction extraction specifically for YouTube content
+function extractInstructionsFromYouTubeContent(content: string): string[] {
+  const instructions: string[] = [];
+  
+  // Split content into lines and clean them
+  const lines = content.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+  
+  for (const line of lines) {
+    // Skip very short lines or non-cooking content
+    if (line.length < 10) continue;
+    
+    // Look for numbered steps (1., 2., Step 1, etc.)
+    if (line.match(/^\d+\.\s+/) || line.match(/^step\s+\d+/i)) {
+      instructions.push(line);
+      continue;
+    }
+    
+    // Look for bullet points or dashes
+    if (line.match(/^[-•*]\s+/) || line.match(/^[•·]\s+/)) {
+      instructions.push(line.replace(/^[-•*·]\s+/, ''));
+      continue;
+    }
+    
+    // Look for cooking action words
+    const cookingVerbs = /(chop|dice|slice|cut|mince|grate|shred|mix|stir|whisk|beat|fold|knead|roll|press|sauté|fry|brown|sear|simmer|boil|steam|bake|roast|grill|broil|blanch|poach|braise|stew|reduce|thicken|season|marinate|toss|combine|add|pour|heat|warm|cool|chill|garnish|serve|plate|present)/i;
+    
+    if (cookingVerbs.test(line)) {
+      // Check if it's a complete instruction (not just a word)
+      if (line.length > 20 && line.match(/[.!?]$/)) {
+        instructions.push(line);
+      } else if (line.length > 15) {
+        // Add period if missing
+        instructions.push(line + '.');
+      }
+      continue;
+    }
+    
+    // Look for timing information (cook for X minutes, bake at X degrees, etc.)
+    if (line.match(/\d+\s*(minute|hour|second|°|degree|temp)/i)) {
+      instructions.push(line);
+      continue;
+    }
+    
+    // Look for temperature information
+    if (line.match(/\d+\s*(°|degree|fahrenheit|celsius|f|c)/i)) {
+      instructions.push(line);
+      continue;
+    }
+  }
+  
+  // If we found very few instructions, try to break down longer content
+  if (instructions.length < 3 && content.length > 50) {
+    // Try to split by common delimiters
+    const sentences = content.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 10);
+    
+    const cookingVerbs = /(chop|dice|slice|cut|mince|grate|shred|mix|stir|whisk|beat|fold|knead|roll|press|sauté|fry|brown|sear|simmer|boil|steam|bake|roast|grill|broil|blanch|poach|braise|stew|reduce|thicken|season|marinate|toss|combine|add|pour|heat|warm|cool|chill|garnish|serve|plate|present)/i;
+    
+    for (const sentence of sentences) {
+      if (cookingVerbs.test(sentence) || sentence.match(/\d+\s*(minute|hour|°|degree)/i)) {
+        instructions.push(sentence + '.');
+      }
+    }
+  }
+  
+  // For very short content (like YouTube Short titles), try to infer basic steps
+  if (instructions.length === 0 && content.length < 100) {
+    const title = content.toLowerCase();
+    
+    // Common recipe patterns in titles
+    if (title.includes('soup')) {
+      instructions.push('Prepare all ingredients');
+      instructions.push('Sauté vegetables until softened');
+      instructions.push('Add liquid and seasonings');
+      instructions.push('Simmer until flavors combine');
+      instructions.push('Blend if desired and serve hot');
+    } else if (title.includes('pasta') || title.includes('noodle')) {
+      instructions.push('Boil water and cook pasta according to package directions');
+      instructions.push('Prepare sauce while pasta cooks');
+      instructions.push('Drain pasta and combine with sauce');
+      instructions.push('Toss well and serve immediately');
+    } else if (title.includes('salad')) {
+      instructions.push('Wash and prepare all vegetables');
+      instructions.push('Chop ingredients to desired size');
+      instructions.push('Make dressing and whisk until combined');
+      instructions.push('Toss salad with dressing just before serving');
+    } else if (title.includes('stir') || title.includes('fry')) {
+      instructions.push('Heat oil in a large pan or wok');
+      instructions.push('Add ingredients in order of cooking time');
+      instructions.push('Stir-fry until cooked through');
+      instructions.push('Season to taste and serve hot');
+    }
+  }
+  
+  return instructions.filter(instruction => instruction && instruction.trim().length > 0);
+}
+
 // Heuristic fallback for recipe extraction when AI fails
 async function extractRecipeHeuristic(content: string): Promise<Response> {
   console.log('Using heuristic recipe extraction fallback');
@@ -748,19 +854,25 @@ async function extractRecipeHeuristic(content: string): Promise<Response> {
       }
     }
     
-    // Special handling for YouTube Shorts - if we have a title but no other content,
-    // try to extract recipe information from the title itself
-    if (ingredients.length === 0 && instructions.length === 0 && content.length < 500) {
-      console.log('Very short content detected, trying to extract from title/description');
+    // Special handling for YouTube content - enhanced instruction extraction
+    if (ingredients.length === 0 && instructions.length === 0) {
+      console.log('No structured content found, trying enhanced YouTube instruction extraction');
       
       // Look for recipe-related keywords in the content
       const recipeKeywords = /(soup|stew|curry|pasta|salad|bread|cake|cookie|pie|pizza|burger|sandwich|rice|noodle|sauce|dressing|marinade|seasoning|spice|herb|vegetable|meat|chicken|beef|fish|seafood|dairy|cheese|milk|cream|butter|oil|flour|sugar|salt|pepper|garlic|onion|tomato|carrot|ginger|potato|broccoli|spinach|lettuce|basil|oregano|thyme|rosemary|parsley|cilantro)/gi;
       const matches = content.match(recipeKeywords);
       
       if (matches && matches.length > 0) {
-        // If we found recipe keywords, treat the entire content as a recipe instruction
-        instructions.push(content);
-        console.log('Added content as recipe instruction based on keywords');
+        // Enhanced instruction extraction for YouTube content
+        const enhancedInstructions = extractInstructionsFromYouTubeContent(content);
+        if (enhancedInstructions.length > 0) {
+          instructions.push(...enhancedInstructions);
+          console.log('Added enhanced instructions from YouTube content:', enhancedInstructions.length);
+        } else {
+          // Fallback: treat the entire content as a recipe instruction
+          instructions.push(content);
+          console.log('Added content as recipe instruction based on keywords');
+        }
       }
     }
     
