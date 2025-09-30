@@ -96,19 +96,19 @@ serve(async (req) => {
     for (const model of models) {
       try {
         console.log(`Trying AI model: ${model}`);
-        aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${openaiApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
+      aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
             model: model,
-            max_completion_tokens: 2000,
-            messages: [
-              {
-                role: 'system',
-                content: `You are a recipe extraction expert. Extract recipe information from website HTML content and return ONLY valid JSON.
+          max_completion_tokens: 2000,
+          messages: [
+            {
+              role: 'system',
+              content: `You are a recipe extraction expert. Extract recipe information from website HTML content and return ONLY valid JSON.
 
 IGNORE: ads, navigation menus, headers, footers, comments, social media widgets, advertisements, unrelated content.
 
@@ -134,9 +134,9 @@ Rules for instructions:
 
 If no clear recipe found, return: {"error": "No recipe found"}
 Return ONLY the JSON, no other text.`
-              },
-              {
-                role: 'user',
+            },
+            {
+              role: 'user',
                 content: `Extract the recipe from this content:\n\n${textToAnalyze.substring(0, 12000)}`
               }
             ]
@@ -479,14 +479,14 @@ function parseIngredientHeuristic(ingredient: string): { name: string; amount: s
 
 // Check if URL is a YouTube video
 function isYouTubeUrl(url: string): boolean {
-  const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)/;
+  const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|shorts\/|embed\/)|youtu\.be\/)/;
   return youtubeRegex.test(url);
 }
 
 // Extract video ID from YouTube URL
 function extractVideoId(url: string): string | null {
   const patterns = [
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/,
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([^&\n?#]+)/,
     /youtube\.com\/watch\?.*v=([^&\n?#]+)/
   ];
   
@@ -525,7 +525,10 @@ async function extractYouTubeDescription(url: string): Promise<string | null> {
     const data = await response.json();
     const description = data.description || '';
     
-    if (description.length < 50) {
+    // For YouTube Shorts, descriptions are often very short, so lower the threshold
+    const minLength = url.includes('/shorts/') ? 10 : 50;
+    
+    if (description.length < minLength) {
       console.log('oEmbed description too short, trying alternative method');
       return await extractDescriptionAlternative(videoId);
     }
@@ -565,6 +568,16 @@ async function extractDescriptionAlternative(videoId: string): Promise<string | 
       const description = descriptionMatch[1];
       console.log('YouTube description extracted from meta tag, length:', description.length);
       return description;
+    }
+
+    // For YouTube Shorts, also try to extract from title and other meta tags
+    const titleMatch = html.match(/<title>([^<]+)</);
+    if (titleMatch) {
+      const title = titleMatch[1].replace(' - YouTube', '').trim();
+      if (title.length > 10) {
+        console.log('YouTube title extracted as fallback, length:', title.length);
+        return title;
+      }
     }
 
     // Try to find description in JSON-LD
@@ -653,8 +666,15 @@ async function extractRecipeHeuristic(content: string): Promise<Response> {
           ingredients.push(line);
         }
         // Look for instruction-like patterns
-        else if (line.match(/(mix|add|heat|bake|cook|stir|chop|dice|slice|boil|fry|roast)/i)) {
+        else if (line.match(/(mix|add|heat|bake|cook|stir|chop|dice|slice|boil|fry|roast|blend|whisk|fold|sauté|simmer|grill|steam)/i)) {
           instructions.push(line);
+        }
+        // For very short content (like YouTube Shorts), be more aggressive
+        else if (line.length > 5 && line.length < 200) {
+          // If it looks like a cooking instruction, add it
+          if (line.match(/(ingredient|recipe|cooking|food|dish|meal)/i)) {
+            instructions.push(line);
+          }
         }
       }
     }
