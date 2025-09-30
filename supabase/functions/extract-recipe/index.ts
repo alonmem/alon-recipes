@@ -447,34 +447,62 @@ function parseIngredientHeuristic(ingredient: string): { name: string; amount: s
   const amount = amountMatch[1].trim();
   const remaining = trimmed.substring(amountMatch[0].length).trim();
 
-  // Pattern to match units
-  const unitPattern = new RegExp(
-    `^(${[
-      'cup', 'cups', 'c', 'c.',
-      'tablespoon', 'tablespoons', 'tbsp', 'tbsp.', 'tbs', 'tbs.',
-      'teaspoon', 'teaspoons', 'tsp', 'tsp.', 't', 't.',
-      'ounce', 'ounces', 'oz', 'oz.',
-      'pound', 'pounds', 'lb', 'lb.', 'lbs', 'lbs.',
-      'gram', 'grams', 'g', 'g.',
-      'kilogram', 'kilograms', 'kg', 'kg.',
-      'milliliter', 'milliliters', 'ml', 'ml.',
-      'liter', 'liters', 'l', 'l.',
-      'pinch', 'pinches', 'dash', 'dashes',
-      'clove', 'cloves', 'slice', 'slices', 'package', 'packages', 'can', 'cans',
-    ].join('|')})`,
-    'i'
-  );
+  // Define units with better specificity
+  const units = [
+    // Multi-word units first (to avoid partial matches)
+    'tablespoon', 'tablespoons', 'tbsp', 'tbsp.', 'tbs', 'tbs.',
+    'teaspoon', 'teaspoons', 'tsp', 'tsp.',
+    'milliliter', 'milliliters', 'ml', 'ml.',
+    'kilogram', 'kilograms', 'kg', 'kg.',
+    'pound', 'pounds', 'lb', 'lb.', 'lbs', 'lbs.',
+    'ounce', 'ounces', 'oz', 'oz.',
+    'liter', 'liters',
+    'gram', 'grams',
+    'cup', 'cups', // Add cups here
+    'pinch', 'pinches', 'dash', 'dashes',
+    'clove', 'cloves', 'slice', 'slices', 'package', 'packages', 'can', 'cans',
+    // Single letter units only if they're clearly units
+    'c', 'c.', // cup
+    'g', 'g.', // gram
+    'l', 'l.', // liter
+    't', 't.', // teaspoon
+  ];
 
-  const unitMatch = remaining.match(unitPattern);
+  // Sort by length (longest first) to avoid partial matches
+  units.sort((a, b) => b.length - a.length);
 
-  if (unitMatch) {
-    const unit = unitMatch[1];
-    const name = remaining.substring(unitMatch[0].length).trim();
-    return { name, amount, unit };
-  } else {
-    // No unit found, treat remaining as name
-    return { name: remaining, amount, unit: '' };
+  // Check for units, but be more careful about single letters
+  for (const unit of units) {
+    const unitPattern = new RegExp(`^${unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'i');
+    const unitMatch = remaining.match(unitPattern);
+    
+    if (unitMatch) {
+      // Special check for single letter units - make sure they're not part of descriptive words
+      if (unit.length === 1 || unit.length === 2) {
+        const beforeUnit = remaining.substring(0, unitMatch.index).trim();
+        const afterUnit = remaining.substring(unitMatch.index + unit.length).trim();
+        
+        // If there's text before the unit, it might be a descriptive word
+        if (beforeUnit.length > 0) {
+          // Check if the text before looks like a descriptive word
+          const descriptiveWords = ['large', 'small', 'medium', 'extra', 'super', 'mini', 'jumbo', 'tiny', 'huge', 'big', 'little'];
+          const lastWord = beforeUnit.split(/\s+/).pop()?.toLowerCase();
+          
+          if (lastWord && descriptiveWords.includes(lastWord)) {
+            // This is likely a descriptive word, not a unit
+            continue;
+          }
+        }
+      }
+      
+      const unitText = unitMatch[0];
+      const name = remaining.substring(unitMatch.index + unitText.length).trim();
+      return { name, amount, unit: unitText };
+    }
   }
+
+  // No unit found, treat remaining as name
+  return { name: remaining, amount, unit: '' };
 }
 
 // Check if URL is a YouTube video
