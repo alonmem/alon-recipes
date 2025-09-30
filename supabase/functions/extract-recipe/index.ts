@@ -497,7 +497,7 @@ function extractVideoId(url: string): string | null {
   return null;
 }
 
-// Extract video description from YouTube using oEmbed API
+// Extract video description from YouTube using Data API v3
 async function extractYouTubeDescription(url: string): Promise<string | null> {
   try {
     const videoId = extractVideoId(url);
@@ -508,39 +508,64 @@ async function extractYouTubeDescription(url: string): Promise<string | null> {
 
     console.log('Extracting description for video ID:', videoId);
 
-    // Use YouTube oEmbed API to get video info
-    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+    // Get YouTube API key from environment
+    const youtubeApiKey = Deno.env.get('YOUTUBE_API_KEY');
+    if (!youtubeApiKey) {
+      console.log('YouTube API key not configured, falling back to alternative method');
+      return await extractDescriptionAlternative(videoId);
+    }
+
+    // Use YouTube Data API v3 to get video details
+    const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${youtubeApiKey}`;
     
-    const response = await fetch(oembedUrl, {
+    const response = await fetch(apiUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; RecipeExtractor/1.0)'
       }
     });
 
     if (!response.ok) {
-      console.log('oEmbed API failed, trying alternative method');
+      console.log('YouTube Data API failed, trying alternative method');
       return await extractDescriptionAlternative(videoId);
     }
 
     const data = await response.json();
-    let description = data.description || '';
     
-    // For YouTube Shorts, if no description, try using the title
-    if (!description && data.title) {
-      console.log('No description found, using title as fallback:', data.title);
-      description = data.title;
-    }
-    
-    // For YouTube Shorts, descriptions are often very short, so lower the threshold
-    const minLength = url.includes('/shorts/') ? 5 : 50;
-    
-    if (description.length < minLength) {
-      console.log('oEmbed description/title too short, trying alternative method');
+    if (!data.items || data.items.length === 0) {
+      console.log('No video data found in API response');
       return await extractDescriptionAlternative(videoId);
     }
 
-    console.log('YouTube description/title extracted via oEmbed, length:', description.length);
-    return description;
+    const video = data.items[0];
+    const snippet = video.snippet;
+    
+    if (!snippet) {
+      console.log('No snippet data found in video');
+      return await extractDescriptionAlternative(videoId);
+    }
+
+    // Get description and title
+    const description = snippet.description || '';
+    const title = snippet.title || '';
+    
+    console.log('YouTube API response - Title:', title);
+    console.log('YouTube API response - Description length:', description.length);
+    
+    // For YouTube Shorts, if description is very short, combine with title
+    if (description.length < 50 && title.length > 10) {
+      const combined = `${title}\n\n${description}`.trim();
+      console.log('Combined title and description for short content, length:', combined.length);
+      return combined;
+    }
+    
+    // Return description if it's substantial, otherwise try alternative
+    if (description.length >= 20) {
+      console.log('YouTube description extracted via Data API, length:', description.length);
+      return description;
+    }
+
+    console.log('YouTube description too short, trying alternative method');
+    return await extractDescriptionAlternative(videoId);
 
   } catch (error) {
     console.error('Error extracting YouTube description:', error);
