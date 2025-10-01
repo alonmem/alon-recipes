@@ -46,6 +46,44 @@ export type Database = {
           },
         ]
       }
+      imported_recipe_urls: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          id: string
+          imported_at: string
+          recipe_id: string | null
+          status: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          imported_at?: string
+          recipe_id?: string | null
+          status?: string
+          url: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          imported_at?: string
+          recipe_id?: string | null
+          status?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "imported_recipe_urls_recipe_id_fkey"
+            columns: ["recipe_id"]
+            isOneToOne: false
+            referencedRelation: "recipes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ingredients: {
         Row: {
           amount: string
@@ -83,10 +121,10 @@ export type Database = {
       }
       recipes: {
         Row: {
+          calories: number | null
           cook_time: number | null
           created_at: string | null
           description: string | null
-          calories: number | null
           id: string
           image: string | null
           instructions: string[] | null
@@ -99,10 +137,10 @@ export type Database = {
           youtube_url: string | null
         }
         Insert: {
+          calories?: number | null
           cook_time?: number | null
           created_at?: string | null
           description?: string | null
-          calories?: number | null
           id?: string
           image?: string | null
           instructions?: string[] | null
@@ -115,10 +153,10 @@ export type Database = {
           youtube_url?: string | null
         }
         Update: {
+          calories?: number | null
           cook_time?: number | null
           created_at?: string | null
           description?: string | null
-          calories?: number | null
           id?: string
           image?: string | null
           instructions?: string[] | null
