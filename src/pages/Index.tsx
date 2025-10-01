@@ -111,11 +111,8 @@ const Index = () => {
   const handleRefreshFromBot = async () => {
     setIsRefreshing(true);
     try {
-      const spreadsheetId = prompt("Enter Google Sheets ID:");
-      if (!spreadsheetId) {
-        setIsRefreshing(false);
-        return;
-      }
+      // Use the fixed Google Sheets ID
+      const spreadsheetId = "1Md5ekUcTQW054tCnmFXIheJHeDMl2C9YkAKyOUTBR6g";
 
       const { data, error } = await supabase.functions.invoke('import-recipes-from-sheets', {
         body: { spreadsheetId, sheetName: 'Sheet1' }
