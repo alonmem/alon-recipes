@@ -77,17 +77,14 @@ export const RecipeCard = ({ recipe, onView }: RecipeCardProps) => {
         <Button onClick={() => onView(recipe)} className="flex-1">
           View Recipe
         </Button>
-        {recipe.youtubeUrl && (
-          <Button variant="outline" size="icon" asChild>
-            <a href={recipe.youtubeUrl} target="_blank" rel="noopener noreferrer">
-              <Youtube className="w-4 h-4" />
-            </a>
-          </Button>
-        )}
         {recipe.websiteUrl && (
           <Button variant="outline" size="icon" asChild>
             <a href={recipe.websiteUrl} target="_blank" rel="noopener noreferrer">
-              <ExternalLink className="w-4 h-4" />
+              {recipe.websiteUrl.includes('youtube.com') || recipe.websiteUrl.includes('youtu.be') ? (
+                <Youtube className="w-4 h-4" />
+              ) : (
+                <ExternalLink className="w-4 h-4" />
+              )}
             </a>
           </Button>
         )}

@@ -81,7 +81,7 @@ serve(async (req) => {
         const { data: existingRecipe, error: checkError } = await supabase
           .from('recipes')
           .select('id, title')
-          .or(`website_url.eq.${url},youtube_url.eq.${url}`)
+          .eq('website_url', url)
           .maybeSingle();
 
         if (checkError) {
@@ -168,8 +168,8 @@ serve(async (req) => {
           instructions: extractData.instructions || [],
           cook_time: 0,
           servings: 1,
-          website_url: url,
-          youtube_url: url.includes('youtube.com') || url.includes('youtu.be') ? url : null,
+          website_url: url, // Single URL field for all types (YouTube, websites, etc.)
+          youtube_url: null, // Remove this field entirely
           calories: null
         };
 

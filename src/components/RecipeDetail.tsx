@@ -97,28 +97,27 @@ export const RecipeDetail = ({ recipe, onBack, onEdit, onAddComment }: RecipeDet
           </Card>
 
           {/* External Links */}
-          {(recipe.youtubeUrl || recipe.websiteUrl) && (
+          {recipe.websiteUrl && (
             <Card>
               <CardHeader>
-                <h3 className="font-semibold">External Links</h3>
+                <h3 className="font-semibold">External Link</h3>
               </CardHeader>
               <CardContent className="space-y-2">
-                {recipe.youtubeUrl && (
-                  <Button variant="outline" className="w-full justify-start gap-2" asChild>
-                    <a href={recipe.youtubeUrl} target="_blank" rel="noopener noreferrer">
-                      <Youtube className="w-4 h-4" />
-                      Watch on YouTube
-                    </a>
-                  </Button>
-                )}
-                {recipe.websiteUrl && (
-                  <Button variant="outline" className="w-full justify-start gap-2" asChild>
-                    <a href={recipe.websiteUrl} target="_blank" rel="noopener noreferrer">
-                      <ExternalLink className="w-4 h-4" />
-                      View Original Recipe
-                    </a>
-                  </Button>
-                )}
+                <Button variant="outline" className="w-full justify-start gap-2" asChild>
+                  <a href={recipe.websiteUrl} target="_blank" rel="noopener noreferrer">
+                    {recipe.websiteUrl.includes('youtube.com') || recipe.websiteUrl.includes('youtu.be') ? (
+                      <>
+                        <Youtube className="w-4 h-4" />
+                        Watch on YouTube
+                      </>
+                    ) : (
+                      <>
+                        <ExternalLink className="w-4 h-4" />
+                        View Original Recipe
+                      </>
+                    )}
+                  </a>
+                </Button>
               </CardContent>
             </Card>
           )}

@@ -54,7 +54,6 @@ export const useRecipes = () => {
         cookTime: recipe.cook_time || 0,
         servings: recipe.servings || 1,
         calories: typeof recipe.calories === 'number' ? recipe.calories : undefined,
-        youtubeUrl: recipe.youtube_url || '',
         websiteUrl: recipe.website_url || '',
         comments: (commentsData || [])
           .filter(comment => comment.recipe_id === recipe.id)
@@ -94,7 +93,6 @@ export const useRecipes = () => {
             instructions: recipe.instructions,
             cook_time: recipe.cookTime,
             servings: recipe.servings,
-            youtube_url: recipe.youtubeUrl,
             website_url: recipe.websiteUrl,
             calories: typeof recipe.calories === 'number' ? recipe.calories : null
           })
@@ -131,7 +129,6 @@ export const useRecipes = () => {
             instructions: recipe.instructions,
             cook_time: recipe.cookTime,
             servings: recipe.servings,
-            youtube_url: recipe.youtubeUrl,
             website_url: recipe.websiteUrl,
             calories: typeof recipe.calories === 'number' ? recipe.calories : null
           })

@@ -373,23 +373,13 @@ export const RecipeForm = ({ recipe, onSave, onCancel, onDelete, isNewRecipe = f
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <Label htmlFor="youtubeUrl">YouTube URL</Label>
-                <Input
-                  id="youtubeUrl"
-                  value={formData.youtubeUrl || ""}
-                  onChange={(e) => setFormData(prev => ({ ...prev, youtubeUrl: e.target.value }))}
-                  placeholder="https://youtube.com/watch?v=..."
-                />
-              </div>
-              
-              <div>
-                <Label htmlFor="websiteUrl">Website URL</Label>
+                <Label htmlFor="websiteUrl">URL (YouTube, Website, etc.)</Label>
                 <div className="flex gap-2">
                   <Input
                     id="websiteUrl"
                     value={formData.websiteUrl || ""}
                     onChange={(e) => setFormData(prev => ({ ...prev, websiteUrl: e.target.value }))}
-                    placeholder="https://example.com/recipe"
+                    placeholder="https://youtube.com/watch?v=... or https://example.com/recipe"
                     className="flex-1"
                   />
                   <Button 

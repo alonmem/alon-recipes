@@ -10,8 +10,7 @@ export interface Recipe {
   cookTime: number;
   servings: number;
   calories?: number;
-  youtubeUrl?: string;
-  websiteUrl?: string;
+  websiteUrl?: string; // Single URL field for all types (YouTube, websites, etc.)
   comments: Comment[];
   createdAt: Date;
   updatedAt: Date;
