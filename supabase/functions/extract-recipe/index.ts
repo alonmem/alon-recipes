@@ -172,7 +172,7 @@ Return ONLY the JSON, no other text.`
         }
       } catch (error) {
         console.error(`Error calling ${model}:`, error);
-        aiError = error.message;
+        aiError = error instanceof Error ? error.message : 'Unknown error';
         continue;
       }
     }
