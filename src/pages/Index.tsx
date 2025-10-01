@@ -5,9 +5,10 @@ import { RecipeSearch } from "@/components/RecipeSearch";
 import { RecipeDetail } from "@/components/RecipeDetail";
 import { RecipeForm } from "@/components/RecipeForm";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { useRecipes } from "@/hooks/useRecipes";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 import heroImage from "@/assets/recipe-hero.jpg";
 const Index = () => {
   const { recipes, loading, saveRecipe, deleteRecipe, addComment } = useRecipes();
@@ -16,6 +17,7 @@ const Index = () => {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Get all available tags from recipes
   const availableTags = useMemo(() => {
@@ -105,6 +107,39 @@ const Index = () => {
     };
     setEditingRecipe(newRecipe);
   };
+
+  const handleRefreshFromBot = async () => {
+    setIsRefreshing(true);
+    try {
+      const spreadsheetId = prompt("Enter Google Sheets ID:");
+      if (!spreadsheetId) {
+        setIsRefreshing(false);
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke('import-recipes-from-sheets', {
+        body: { spreadsheetId, sheetName: 'Sheet1' }
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Import complete",
+        description: `Imported: ${data.imported}, Skipped: ${data.skipped}, Failed: ${data.failed}`,
+      });
+
+      // Refresh the recipes list
+      window.location.reload();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to import recipes",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
   if (editingRecipe) {
     return (
       <div className="min-h-screen bg-background">
@@ -158,10 +193,21 @@ const Index = () => {
         <div className="bg-card rounded-lg p-6 shadow-[var(--shadow-card)]">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-semibold">Browse Recipes</h2>
-            <Button onClick={handleCreateRecipe} className="gap-2">
-              <Plus className="w-4 h-4" />
-              Add Recipe
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                onClick={handleRefreshFromBot} 
+                variant="outline" 
+                className="gap-2"
+                disabled={isRefreshing}
+              >
+                <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                Refresh from Bot
+              </Button>
+              <Button onClick={handleCreateRecipe} className="gap-2">
+                <Plus className="w-4 h-4" />
+                Add Recipe
+              </Button>
+            </div>
           </div>
           
           <RecipeSearch onSearch={setSearchQuery} onTagFilter={setSelectedTags} availableTags={availableTags} selectedTags={selectedTags} />
