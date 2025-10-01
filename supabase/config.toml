@@ -2,3 +2,6 @@ project_id = "tmxelvnlrgnvwesyikos"
 
 [functions.extract-recipe]
 verify_jwt = false
+
+[functions.import-recipes-from-sheets]
+verify_jwt = false
