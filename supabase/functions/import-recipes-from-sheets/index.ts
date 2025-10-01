@@ -77,34 +77,34 @@ serve(async (req) => {
       }
 
       try {
-        // Check if URL has already been processed
-        const { data: existing, error: checkError } = await supabase
-          .from('imported_recipe_urls')
-          .select('id, status')
-          .eq('url', url)
+        // Check if URL already exists in recipes table
+        const { data: existingRecipe, error: checkError } = await supabase
+          .from('recipes')
+          .select('id, title')
+          .or(`website_url.eq.${url},youtube_url.eq.${url}`)
           .maybeSingle();
 
         if (checkError) {
-          console.error('Error checking existing URL:', checkError);
+          console.error('Error checking existing recipe:', checkError);
           failed++;
           continue;
         }
 
-        if (existing) {
-          console.log('URL already processed:', url, 'status:', existing.status);
+        if (existingRecipe) {
+          console.log('Recipe already exists for URL:', url, 'recipe:', existingRecipe.title);
           skipped++;
           continue;
         }
 
-        // Insert URL as pending
+        // Upsert URL as pending in tracking table (handle existing records)
         const { data: urlRecord, error: insertError } = await supabase
           .from('imported_recipe_urls')
-          .insert({ url, status: 'pending' })
+          .upsert({ url, status: 'pending' }, { onConflict: 'url' })
           .select()
           .single();
 
         if (insertError) {
-          console.error('Error inserting URL record:', insertError);
+          console.error('Error upserting URL record:', insertError);
           failed++;
           continue;
         }
@@ -129,11 +129,40 @@ serve(async (req) => {
           continue;
         }
 
+        // Extract proper title and thumbnail - use YouTube video data if available
+        let recipeTitle = extractTitle(url);
+        let recipeImage = '';
+        
+        // For YouTube videos, try to get the actual video title and thumbnail
+        if (url.includes('youtube.com') || url.includes('youtu.be')) {
+          try {
+            const youtubeApiKey = Deno.env.get('YOUTUBE_API_KEY');
+            if (youtubeApiKey) {
+              const videoId = extractVideoIdFromUrl(url);
+              if (videoId) {
+                const youtubeData = await getYouTubeVideoData(videoId, youtubeApiKey);
+                if (youtubeData) {
+                  if (youtubeData.title) {
+                    recipeTitle = youtubeData.title;
+                    console.log('Using YouTube video title:', recipeTitle);
+                  }
+                  if (youtubeData.thumbnail) {
+                    recipeImage = youtubeData.thumbnail;
+                    console.log('Using YouTube thumbnail:', recipeImage);
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            console.log('Failed to get YouTube data, using URL-based title:', error);
+          }
+        }
+
         // Create recipe from extracted data
         const recipeData = {
-          title: extractTitle(url), // Extract title from URL or use domain
+          title: recipeTitle,
           description: '',
-          image: '',
+          image: recipeImage, // Use YouTube thumbnail if available
           rating: 0,
           tags: [],
           instructions: extractData.instructions || [],
@@ -228,6 +257,70 @@ serve(async (req) => {
     );
   }
 });
+
+// Helper function to extract video ID from YouTube URL
+function extractVideoIdFromUrl(url: string): string | null {
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([^&\n?#]+)/,
+    /youtube\.com\/watch\?.*v=([^&\n?#]+)/
+  ];
+  
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+// Helper function to get YouTube video data (title and thumbnail) using Data API v3
+async function getYouTubeVideoData(videoId: string, apiKey: string): Promise<{ title: string; thumbnail: string } | null> {
+  try {
+    const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`;
+    
+    const response = await fetch(apiUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; RecipeExtractor/1.0)'
+      }
+    });
+
+    if (!response.ok) {
+      console.log('YouTube API failed for data extraction:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    
+    if (!data.items || data.items.length === 0) {
+      console.log('No video data found for extraction');
+      return null;
+    }
+
+    const video = data.items[0];
+    const snippet = video.snippet;
+    
+    if (!snippet) {
+      console.log('No snippet found in video data');
+      return null;
+    }
+
+    const title = snippet.title || '';
+    const thumbnail = snippet.thumbnails?.maxres?.url || 
+                     snippet.thumbnails?.high?.url || 
+                     snippet.thumbnails?.medium?.url || 
+                     snippet.thumbnails?.default?.url || '';
+
+    return { title, thumbnail };
+  } catch (error) {
+    console.error('Error getting YouTube video data:', error);
+    return null;
+  }
+}
+
+// Legacy function for backward compatibility
+async function getYouTubeVideoTitle(videoId: string, apiKey: string): Promise<string | null> {
+  const data = await getYouTubeVideoData(videoId, apiKey);
+  return data?.title || null;
+}
 
 // Helper function to extract title from URL
 function extractTitle(url: string): string {
